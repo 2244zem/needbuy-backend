@@ -10,8 +10,19 @@ RUN apt-get update -y \
 
 WORKDIR /app
 
-# Skema Prisma disalin SEBELUM npm ci, karena `postinstall: prisma generate`
-# jalan di dalam npm ci dan butuh berkas skemanya sudah ada.
+# `prisma generate` jalan di dalam `npm ci` lewat script postinstall, dan
+# MENOLAK berjalan kalau DATABASE_URL / DIRECT_URL tidak ada — walau dia tidak
+# benar-benar menyambung ke database saat generate.
+#
+# Railway hanya menyuntikkan variable ke runtime, tidak ke tahap build
+# Dockerfile. Jadi di sini diisi nilai semu.
+#
+# Sengaja ARG, bukan ENV: nilai ARG hanya hidup selama build dan TIDAK ikut ke
+# image jadi. Saat container jalan, yang dipakai murni variable dari Railway.
+ARG DATABASE_URL="postgresql://build:build@localhost:5432/build"
+ARG DIRECT_URL="postgresql://build:build@localhost:5432/build"
+
+# Skema Prisma disalin SEBELUM npm ci, karena generate butuh berkas skemanya.
 COPY package*.json ./
 COPY prisma ./prisma
 RUN npm ci
