@@ -54,14 +54,14 @@ const envSchema = z.object({
   MAIL_FROM_ADDRESS: z.string().email().default("needbuy.platform@gmail.com"),
   MAIL_FROM_NAME: z.string().default("NeedBuy"),
 
-  // Cloudflare R2 (penyimpanan berkas). Semuanya opsional: kalau kosong,
+  // Supabase Storage (penyimpanan berkas). Semuanya opsional: kalau kosong,
   // modul uploads menyimpan berkas di Postgres seperti sebelumnya, jadi
-  // pengembangan lokal tidak butuh akun Cloudflare.
-  R2_ACCOUNT_ID: z.string().optional(),
-  R2_ACCESS_KEY_ID: z.string().optional(),
-  R2_SECRET_ACCESS_KEY: z.string().optional(),
-  R2_BUCKET: z.string().optional(),
-  R2_PUBLIC_URL: z.string().url().optional(),
+  // pengembangan lokal tidak butuh akun apa pun.
+  SUPABASE_PROJECT_REF: z.string().optional(),
+  SUPABASE_S3_ACCESS_KEY_ID: z.string().optional(),
+  SUPABASE_S3_SECRET_ACCESS_KEY: z.string().optional(),
+  SUPABASE_STORAGE_BUCKET: z.string().optional(),
+  SUPABASE_S3_REGION: z.string().default("ap-southeast-1"),
 });
 
 const parsed = envSchema.safeParse(process.env);

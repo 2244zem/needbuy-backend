@@ -17,7 +17,7 @@ Backend saja. TypeScript · Express · Prisma · PostgreSQL · Midtrans Snap (sa
 | [docs/business-rules.md](docs/business-rules.md) | Matching, scoring, budget, order |
 | [docs/security.md](docs/security.md) | Auth, otorisasi, rate limit, pembayaran |
 | [CLAUDE.md](CLAUDE.md) | Konteks proyek yang dikunci |
-| repo `needbuy-submission` | Panduan deploy ke Render + Supabase + Vercel + Cloudflare R2 |
+| repo `needbuy-submission` | Panduan deploy ke Render + Supabase + Vercel |
 
 ---
 
@@ -369,21 +369,25 @@ tersambung lagi begitu server bangun, dan webhook Midtrans yang datang saat
 server tidur bisa kena timeout. Menembak `/health` tiap 10–14 menit lewat
 UptimeRobot menghilangkan keduanya.
 
-Penyimpanan berkas memakai **Cloudflare R2**. Kelima variabel `R2_*` bersifat
-opsional: kalau kosong, berkas unggahan kembali disimpan di dalam Postgres dan
-dilayani lewat `GET /uploads/:id`. Itu cukup untuk pengembangan lokal, tapi di
-produksi harus diisi — gambar di dalam Postgres akan menghabiskan kuota
-database gratis jauh sebelum kuota penyimpanan objek habis.
+Penyimpanan berkas memakai **Supabase Storage**, lewat endpoint
+S3-compatible-nya. Variabel `SUPABASE_*` bersifat opsional: kalau kosong,
+berkas unggahan kembali disimpan di dalam Postgres dan dilayani lewat
+`GET /uploads/:id`. Itu cukup untuk pengembangan lokal.
+
+Di produksi sebaiknya diisi. Paket gratis Supabase memberi **500 MB database
+tapi 1 GB storage**, jadi menaruh gambar di database menghabiskan kuota yang
+salah lebih dulu. Kuotanya ikut project Supabase yang sama dengan database,
+jadi tidak perlu mendaftarkan kartu di layanan mana pun.
 
 URL gambar lama yang sudah terlanjur tersimpan di database tetap dilayani,
-jadi mengaktifkan R2 tidak mematikan gambar yang sudah ada.
+jadi mengaktifkan Storage tidak mematikan gambar yang sudah ada.
 
 Langkah lengkap dari nol sampai online ada di repo `needbuy-submission`.
 
 ### Yang tidak boleh masuk GitHub
 
 `.env`, Midtrans **server** key, `GOOGLE_CLIENT_SECRET`, App Password Gmail,
-dan kredensial R2. Semuanya diisi sebagai *environment variable* di dashboard
+dan S3 access key Supabase. Semuanya diisi sebagai *environment variable* di dashboard
 Render.
 Cek cepat sebelum push:
 

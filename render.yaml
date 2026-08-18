@@ -47,15 +47,15 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
-      - key: R2_ACCOUNT_ID
+      - key: SUPABASE_PROJECT_REF
         sync: false
-      - key: R2_ACCESS_KEY_ID
+      - key: SUPABASE_S3_ACCESS_KEY_ID
         sync: false
-      - key: R2_SECRET_ACCESS_KEY
+      - key: SUPABASE_S3_SECRET_ACCESS_KEY
         sync: false
-      - key: R2_BUCKET
+      - key: SUPABASE_STORAGE_BUCKET
         sync: false
-      - key: R2_PUBLIC_URL
+      - key: SUPABASE_S3_REGION
         sync: false
       - key: SMTP_USER
         sync: false
