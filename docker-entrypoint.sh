@@ -4,17 +4,8 @@ echo "==> Starting NeedBuy backend..."
 echo "    NODE_ENV=$NODE_ENV"
 echo "    PORT=${PORT:-8000}"
 
-echo "==> Running prisma migrate deploy..."
-if npx prisma migrate deploy 2>&1; then
-  echo "==> Migrations applied successfully."
-else
-  echo "WARN: prisma migrate deploy failed. Falling back to prisma db push..."
-  if npx prisma db push --accept-data-loss 2>&1; then
-    echo "==> prisma db push succeeded."
-  else
-    echo "ERROR: prisma db push also failed. Starting server anyway..."
-  fi
-fi
+echo "==> Running prisma migrate deploy (timeout 30s)..."
+timeout 30 npx prisma migrate deploy 2>&1 && echo "==> Migrations OK." || echo "WARN: prisma migrate deploy failed/timed out, skipping."
 
 echo "==> Starting server on port ${PORT:-8000}..."
 exec node dist/server.js
