@@ -5,7 +5,7 @@ dist/
 .DS_Store
 
 # Berkas yang diunggah user — artefak runtime, bukan sumber kode.
-uploads/
+/uploads
 
 # Semua varian .env — hanya .env.example yang boleh ikut.
 .env
