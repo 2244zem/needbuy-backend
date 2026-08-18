@@ -1,0 +1,111 @@
+const SLANG: Record<string, string> = {
+  yg: "yang",
+  dgn: "dengan",
+  dg: "dengan",
+  utk: "untuk",
+  untk: "untuk",
+  bwt: "untuk",
+  tp: "tapi",
+  tpi: "tapi",
+  krn: "karena",
+  karna: "karena",
+  krna: "karena",
+  sy: "saya",
+  gw: "saya",
+  gue: "saya",
+  gua: "saya",
+  lu: "kamu",
+  lo: "kamu",
+  elu: "kamu",
+  gk: "tidak",
+  ga: "tidak",
+  gak: "tidak",
+  nggak: "tidak",
+  ngga: "tidak",
+  enggak: "tidak",
+  kagak: "tidak",
+  tdk: "tidak",
+  bgt: "banget",
+  bngt: "banget",
+  blm: "belum",
+  blum: "belum",
+  udh: "sudah",
+  udah: "sudah",
+  sdh: "sudah",
+  dr: "dari",
+  dri: "dari",
+  dlm: "dalam",
+  jg: "juga",
+  klo: "kalau",
+  kalo: "kalau",
+  klu: "kalau",
+  gmn: "bagaimana",
+  gimana: "bagaimana",
+  brp: "berapa",
+  hrg: "harga",
+  msh: "masih",
+  bs: "bisa",
+  pgn: "ingin",
+  pgen: "ingin",
+  pengen: "ingin",
+  pengin: "ingin",
+  dpt: "dapat",
+  org: "orang",
+  skrg: "sekarang",
+  skrng: "sekarang",
+  kmrn: "kemarin",
+  spek: "spesifikasi",
+  batre: "baterai",
+  baterei: "baterai",
+  hape: "handphone",
+  henpon: "handphone",
+  hh: "handphone",
+  lepi: "laptop",
+  mrh: "murah",
+  murce: "murah",
+  bgs: "bagus",
+  aj: "saja",
+  trs: "terus",
+  jgn: "jangan",
+  kyk: "seperti",
+  kaya: "seperti",
+  kayak: "seperti",
+  sprt: "seperti",
+  max: "maksimal",
+  maks: "maksimal",
+  rekom: "rekomendasi",
+  rekomen: "rekomendasi",
+  knp: "kenapa",
+  dmn: "dimana",
+  bkn: "bukan",
+  sblm: "sebelum",
+  ssdh: "sesudah",
+  tgl: "tanggal",
+  thn: "tahun",
+  bln: "bulan",
+};
+
+const PHRASE_RULES: { pattern: RegExp; replacement: string }[] = [
+  {
+    pattern: /\blg\s+(nyari|cari|mencari|butuh|pengen|pengin|mau|ingin|perlu|liat|lihat|browsing)\b/gi,
+    replacement: "lagi $1",
+  },
+  {
+    pattern: /\b(nyari|cari|butuh|pengen|mau|ingin|beli)\s+lg\b/gi,
+    replacement: "$1 lagi",
+  },
+];
+
+export function collapseElongation(text: string): string {
+  return text.replace(/([a-z])\1{2,}/gi, "$1");
+}
+
+export function normalizeSlang(text: string): string {
+  if (!text) return "";
+
+  let out = collapseElongation(text).toLowerCase();
+  for (const rule of PHRASE_RULES) out = out.replace(rule.pattern, rule.replacement);
+  return out.replace(/[a-z]+/g, (word) => SLANG[word] ?? word);
+}
+
+export const SLANG_WORDS = Object.keys(SLANG);

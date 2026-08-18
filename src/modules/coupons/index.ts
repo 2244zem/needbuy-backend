@@ -1,0 +1,1 @@
+export { couponsRouter } from "./routes";

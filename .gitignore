@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+
+# Berkas yang diunggah user — artefak runtime, bukan sumber kode.
+uploads/
+
+# Semua varian .env — hanya .env.example yang boleh ikut.
+.env
+.env.*
+!.env.example
+
+# Berkas test tidak ikut ke repo deploy (tetap ada di laptop dan tetap
+# bisa dijalankan dengan `npm test`). Build produksi memang sudah
+# meng-exclude-nya lewat tsconfig.build.json.
+*.test.ts

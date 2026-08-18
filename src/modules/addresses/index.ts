@@ -1,0 +1,1 @@
+export { addressesRouter } from "./routes";

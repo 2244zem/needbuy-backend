@@ -1,0 +1,942 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+
+  // DATABASE_URL menunjuk connection pooler (Supabase: Transaction pooler,
+  // port 6543). Aman untuk query aplikasi sehari-hari.
+  url = env("DATABASE_URL")
+
+  // DIRECT_URL menunjuk koneksi langsung (Supabase: Session pooler, port 5432).
+  // `prisma migrate` TIDAK bisa lewat pooler mode transaction — pooler itu
+  // tidak mendukung prepared statement dan advisory lock yang dipakai migrasi.
+  // WAJIB ada isinya. Untuk Postgres lokal yang tidak memakai pooler, isi
+  // sama persis dengan DATABASE_URL.
+  directUrl = env("DIRECT_URL")
+}
+
+// ENUMS
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
+enum UserRole {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+// Verifikasi email dan reset password punya bentuk data yang persis sama
+// (token sekali pakai, ada masa berlaku, milik satu user). Satu tabel dengan
+// kolom `purpose` menghindari dua tabel kembar yang harus dirawat berdua.
+enum AuthTokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum SellerStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum NeedStatus {
+  DRAFT
+  PROCESSING
+  COMPLETED
+}
+
+enum RecommendationLabel {
+  BEST_MATCH
+  GOOD_MATCH
+  ALTERNATIVE
+}
+
+enum PlanStatus {
+  DRAFT
+  READY
+  NEEDS_ADJUSTMENT
+}
+
+enum OrderStatus {
+  WAITING_PAYMENT
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
+  FREE_SHIPPING
+}
+
+enum CouponCategory {
+  SHIPPING
+  CASHBACK
+  DISCOUNT
+}
+
+enum TrackingStage {
+  PACKING
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RETURNED
+  CANCELLED
+}
+
+enum NotificationType {
+  ORDER_NEW
+  ORDER_STATUS
+  PAYMENT
+  LOW_STOCK
+  REVIEW
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+// USERS & SELLERS
+
+model User {
+  id             String       @id @default(uuid())
+  username       String       @unique
+  name           String
+  email          String       @unique
+  passwordHash   String?      @map("password_hash")
+  phone          String?
+  // URL hasil POST /uploads/image. Disimpan sebagai URL, bukan relasi ke Upload,
+  // supaya sumbernya bisa berupa avatar Google saat login sosial juga.
+  // Selalu ikut keluar ke lawan bicara di chat, foto profil memang publik.
+  avatarUrl      String?      @map("avatar_url")
+  role           UserRole     @default(BUYER)
+  authProvider   AuthProvider @default(LOCAL) @map("auth_provider")
+  authProviderId String?      @map("auth_provider_id")
+  // Null = email belum diverifikasi. Sengaja timestamp, bukan boolean: kapan
+  // diverifikasi adalah informasi yang dibutuhkan saat menelusuri akun bermasalah.
+  emailVerifiedAt DateTime?   @map("email_verified_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  seller        Seller?
+  adminProfile  AdminProfile?
+  needs         Need[]
+  cart          Cart?
+  shoppingPlans ShoppingPlan[]
+  addresses     Address[]
+  orders        Order[]
+  reviews       Review[]
+  savedProducts SavedProduct[]
+  refreshTokens RefreshToken[]
+  coupons       UserCoupon[]
+  buyerChats    Conversation[] @relation("ConversationBuyer")
+  messages      Message[]
+  notifications Notification[]
+  productViews  ProductView[]
+  uploads       Upload[]
+  follows       SellerFollow[]
+  wallet        Wallet?
+  reports       Report[]
+  authTokens    AuthToken[]
+
+  @@map("users")
+}
+
+// Token verifikasi email & reset password.
+//
+// Yang disimpan hash sha256-nya, bukan tokennya, sama seperti refresh_tokens.
+// Kalau isi tabel ini bocor, token mentahnya tidak ikut bocor, jadi tidak ada
+// yang bisa dipakai mengambil alih akun orang.
+model AuthToken {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  purpose   AuthTokenPurpose
+  tokenHash String           @unique @map("token_hash")
+  expiresAt DateTime         @map("expires_at")
+  usedAt    DateTime?        @map("used_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Dipakai untuk membatalkan token lama saat token baru diterbitkan, dan
+  // untuk menghitung jatah kirim ulang per jam.
+  @@index([userId, purpose, createdAt])
+  @@map("auth_tokens")
+}
+
+// NEEDPAY
+
+enum WalletTxType {
+  TOPUP
+  PAYMENT
+  REFUND
+  // Penarikan saldo penjual ke rekening bank. Tidak butuh tabel sendiri:
+  // penarikan adalah mutasi dompet seperti yang lain, dan menaruhnya di buku
+  // besar yang sama membuat saldo tetap punya satu sumber kebenaran.
+  WITHDRAWAL
+}
+
+enum WalletTxStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  EXPIRED
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  balance   Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id           String         @id @default(uuid())
+  walletId     String         @map("wallet_id")
+  type         WalletTxType
+  status       WalletTxStatus @default(PENDING)
+  amount       Decimal        @db.Decimal(14, 2)
+  // Saldo setelah baris ini diterapkan. Null selagi PENDING, KECUALI
+  // WITHDRAWAL: penarikan memotong saldo sejak diajukan (lihat
+  // `requestWithdrawal`), jadi barisnya sudah punya saldo akhir walau
+  // statusnya masih menunggu persetujuan admin.
+  balanceAfter Decimal?       @map("balance_after") @db.Decimal(14, 2)
+  // Terisi untuk PAYMENT/REFUND yang berkaitan dengan sebuah order.
+  orderId      String?        @map("order_id")
+  note         String?
+
+  midtransOrderId String? @unique @map("midtrans_order_id")
+  snapToken       String? @map("snap_token")
+  snapRedirectUrl String? @map("snap_redirect_url")
+  rawResponse     Json?   @map("raw_response")
+
+  // Hanya terisi untuk WITHDRAWAL: rekening tujuan yang disebut penjual saat
+  // mengajukan, disimpan apa adanya sebagai snapshot. Kalau penjual mengganti
+  // rekeningnya nanti, riwayat penarikan lama tetap menunjukkan ke mana uang
+  // itu benar-benar dikirim.
+  bankName        String? @map("bank_name")
+  bankAccount     String? @map("bank_account")
+  bankAccountName String? @map("bank_account_name")
+  // Admin yang menyetujui/menolak. Tanpa foreign key, sama alasannya dengan
+  // audit_logs: barisnya harus tetap utuh walau akun adminnya dihapus.
+  handledById     String?   @map("handled_by_id")
+  handledAt       DateTime? @map("handled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+
+model Seller {
+  id        String       @id @default(uuid())
+  userId    String       @unique @map("user_id")
+  storeName String       @map("store_name")
+  description   String?  @db.Text
+  logoUrl       String?  @map("logo_url")
+  address       String?  @db.Text
+  phone         String?
+  businessEmail String?  @map("business_email")
+  vacationMode  Boolean  @default(false) @map("vacation_mode")
+  rating    Decimal      @default(0) @db.Decimal(3, 2)
+  status    SellerStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products Product[]
+  orders   Order[]
+  chats     Conversation[]
+  views     ProductView[]
+  followers SellerFollow[]
+
+  @@map("sellers")
+}
+
+// CATALOG
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  // Keterangan singkat yang tampil di panel admin. Nullable: kategori lama
+  // tidak punya dan tidak perlu dipaksa mengisi.
+  description String? @map("description")
+  // Kategori nonaktif disembunyikan dari katalog publik (listTree) tapi tetap
+  // ada di panel admin: dipakai untuk mempensiunkan kategori tanpa menghapus
+  // produk yang masih menempel padanya.
+  isActive  Boolean  @default(true) @map("is_active")
+  parentId  String?  @map("parent_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  sellerId    String   @map("seller_id")
+  categoryId  String   @map("category_id")
+  sku         String?  @unique
+  name        String
+  slug        String   @unique
+  description String?
+  price       Decimal  @db.Decimal(14, 2)
+  stock       Int      @default(0)
+  isActive    Boolean  @default(true) @map("is_active")
+  discountPercent Int  @default(0) @map("discount_percent")
+  bulkMinQty          Int? @map("bulk_min_qty")
+  bulkDiscountPercent Int? @map("bulk_discount_percent")
+  rating      Decimal  @default(0) @db.Decimal(3, 2)
+  soldCount   Int      @default(0) @map("sold_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  seller            Seller             @relation(fields: [sellerId], references: [id])
+  category          Category           @relation(fields: [categoryId], references: [id])
+  images            ProductImage[]
+  attributes        ProductAttribute[]
+  reviews           Review[]
+  cartItems         CartItem[]
+  shoppingPlanItems ShoppingPlanItem[]
+  orderItems        OrderItem[]
+  recommendations   Recommendation[]
+  savedBy           SavedProduct[]
+  views             ProductView[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String  @map("product_id")
+  url       String
+  isPrimary Boolean @default(false) @map("is_primary")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_images")
+}
+
+model ProductAttribute {
+  id        String @id @default(uuid())
+  productId String @map("product_id")
+  attrKey   String @map("attr_key")
+  attrValue String @map("attr_value")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([attrKey, attrValue])
+  @@map("product_attributes")
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  orderItemId String   @unique @map("order_item_id")
+  userId      String   @map("user_id")
+  productId   String   @map("product_id")
+  rating      Int
+  comment     String?
+  // Moderasi admin. Ulasan yang disembunyikan tidak tampil di halaman produk,
+  // tapi barisnya TIDAK dihapus: rating produk & penjual dihitung dari ulasan
+  // yang tampil, dan menghapus baris berarti kehilangan jejak kenapa angkanya
+  // berubah. Menyembunyikan juga bisa dibatalkan; menghapus tidak.
+  isHidden    Boolean  @default(false) @map("is_hidden")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  orderItem OrderItem     @relation(fields: [orderItemId], references: [id])
+  user      User          @relation(fields: [userId], references: [id])
+  product   Product       @relation(fields: [productId], references: [id])
+  media     ReviewMedia[]
+
+  @@map("reviews")
+}
+
+model ReviewMedia {
+  id        String    @id @default(uuid())
+  reviewId  String    @map("review_id")
+  url       String
+  kind      MediaKind @default(IMAGE)
+  sortOrder Int       @default(0) @map("sort_order")
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@map("review_media")
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+}
+
+model SellerFollow {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  sellerId  String   @map("seller_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sellerId])
+  @@index([sellerId])
+  @@map("seller_follows")
+}
+
+model Address {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  label         String?
+  recipientName String   @map("recipient_name")
+  phone         String
+  fullAddress   String   @map("full_address")
+  city          String
+  province      String
+  postalCode    String   @map("postal_code")
+  isDefault     Boolean  @default(false) @map("is_default")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@map("addresses")
+}
+
+
+model Need {
+  id        String     @id @default(uuid())
+  userId    String     @map("user_id")
+  rawInput  String     @map("raw_input")
+  goal      String?
+  budget    Decimal?   @db.Decimal(14, 2)
+  location  String?
+  status    NeedStatus @default(DRAFT)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requirements    NeedRequirement[]
+  preferences     NeedPreference[]
+  recommendations Recommendation[]
+  shoppingPlans   ShoppingPlan[]
+  clarifications  NeedClarification[]
+
+  @@map("needs")
+}
+
+model NeedClarification {
+  id         String    @id @default(uuid())
+  needId     String    @map("need_id")
+  ordinal    Int
+  field      String    @db.VarChar(32)
+  question   String
+  context    String?
+  answer     String?
+  answeredAt DateTime? @map("answered_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  need Need @relation(fields: [needId], references: [id], onDelete: Cascade)
+
+  @@unique([needId, ordinal])
+  @@index([needId, answeredAt])
+  @@map("need_clarifications")
+}
+
+model NeedRequirement {
+  id                String  @id @default(uuid())
+  needId            String  @map("need_id")
+  requirementKey    String  @map("requirement_key")
+  requirementValue  String  @map("requirement_value")
+  isHardRequirement Boolean @default(true) @map("is_hard_requirement")
+
+  need Need @relation(fields: [needId], references: [id], onDelete: Cascade)
+
+  @@map("need_requirements")
+}
+
+model NeedPreference {
+  id              String  @id @default(uuid())
+  needId          String  @map("need_id")
+  preferenceKey   String  @map("preference_key")
+  preferenceValue String  @map("preference_value")
+  weight          Decimal @default(1) @db.Decimal(4, 2)
+
+  need Need @relation(fields: [needId], references: [id], onDelete: Cascade)
+
+  @@map("need_preferences")
+}
+
+model Recommendation {
+  id               String              @id @default(uuid())
+  needId           String              @map("need_id")
+  productId        String              @map("product_id")
+  matchScore       Decimal             @map("match_score") @db.Decimal(5, 2)
+  categoryScore    Decimal             @map("category_score") @db.Decimal(5, 2)
+  budgetScore      Decimal             @map("budget_score") @db.Decimal(5, 2)
+  requirementScore Decimal             @map("requirement_score") @db.Decimal(5, 2)
+  preferenceScore  Decimal             @map("preference_score") @db.Decimal(5, 2)
+  qualityScore     Decimal             @map("quality_score") @db.Decimal(5, 2)
+  sellerScore      Decimal             @map("seller_score") @db.Decimal(5, 2)
+  label            RecommendationLabel
+  ranking          Int
+  explanation      String?
+  createdAt        DateTime            @default(now()) @map("created_at")
+
+  need    Need    @relation(fields: [needId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([needId, productId])
+  @@index([needId, ranking])
+  @@map("recommendations")
+}
+
+// SHOPPING PLAN
+
+model ShoppingPlan {
+  id        String     @id @default(uuid())
+  needId    String?    @map("need_id")
+  userId    String     @map("user_id")
+  name      String?    @db.VarChar(60)
+  budget    Decimal    @default(0) @db.Decimal(14, 2)
+  total     Decimal    @default(0) @db.Decimal(14, 2)
+  remaining Decimal    @default(0) @db.Decimal(14, 2)
+  status    PlanStatus @default(DRAFT)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  need  Need?              @relation(fields: [needId], references: [id])
+  user  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items ShoppingPlanItem[]
+
+  @@map("shopping_plans")
+}
+
+model ShoppingPlanItem {
+  id             String   @id @default(uuid())
+  shoppingPlanId String   @map("shopping_plan_id")
+  productId      String   @map("product_id")
+  quantity       Int      @default(1)
+  priceAtAdd     Decimal  @map("price_at_add") @db.Decimal(14, 2)
+  subtotal       Decimal  @db.Decimal(14, 2)
+  isReplaced     Boolean  @default(false) @map("is_replaced")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  shoppingPlan ShoppingPlan @relation(fields: [shoppingPlanId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
+
+  @@map("shopping_plan_items")
+}
+
+// CART
+
+model Cart {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  budget    Decimal? @db.Decimal(14, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id         String   @id @default(uuid())
+  cartId     String   @map("cart_id")
+  productId  String   @map("product_id")
+  quantity   Int      @default(1)
+  variant    String?
+  priceAtAdd Decimal  @map("price_at_add") @db.Decimal(14, 2)
+  subtotal   Decimal  @db.Decimal(14, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
+}
+
+// CHECKOUT / ORDERS (one Order per seller per checkout, grouped)
+
+model Order {
+  id           String      @id @default(uuid())
+  orderNumber  String      @unique @map("order_number")
+  userId       String      @map("user_id")
+  sellerId     String      @map("seller_id")
+  addressId    String      @map("address_id")
+  status       OrderStatus @default(WAITING_PAYMENT)
+  subtotal     Decimal     @db.Decimal(14, 2)
+  shippingCost Decimal     @default(0) @map("shipping_cost") @db.Decimal(14, 2)
+  discount     Decimal     @default(0) @db.Decimal(14, 2)
+  couponId     String?     @map("coupon_id")
+  total        Decimal     @db.Decimal(14, 2)
+
+  commissionPercent Decimal @default(0) @map("commission_percent") @db.Decimal(5, 2)
+  commissionAmount  Decimal @default(0) @map("commission_amount") @db.Decimal(14, 2)
+  deliveredAt  DateTime?   @map("delivered_at")
+  completedAt  DateTime?   @map("completed_at")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  user    User        @relation(fields: [userId], references: [id])
+  seller  Seller      @relation(fields: [sellerId], references: [id])
+  address Address     @relation(fields: [addressId], references: [id])
+  coupon  Coupon?     @relation(fields: [couponId], references: [id])
+  items         OrderItem[]
+  payment       Payment?
+  notifications Notification[]
+  tracking      OrderTracking[]
+
+  @@index([userId])
+  @@index([sellerId])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderTracking {
+  id          String        @id @default(uuid())
+  orderId     String        @map("order_id")
+  stage       TrackingStage
+  description String
+  location    String?
+  createdById String?       @map("created_by_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("order_tracking")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String  @map("order_id")
+  productId String  @map("product_id")
+  productName String @map("product_name")
+  variant   String?
+  quantity  Int
+  price     Decimal @db.Decimal(14, 2)
+  subtotal  Decimal @db.Decimal(14, 2)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id])
+  review  Review?
+
+  @@map("order_items")
+}
+
+// PAYMENTS (SANDBOX ONLY)
+
+model Payment {
+  id                    String        @id @default(uuid())
+  orderId               String        @unique @map("order_id")
+  method                String?       @map("method")
+  status                PaymentStatus @default(PENDING)
+  midtransOrderId       String        @unique @map("midtrans_order_id")
+  midtransTransactionId String?       @map("midtrans_transaction_id")
+  snapToken             String?       @map("snap_token")
+  snapRedirectUrl       String?       @map("snap_redirect_url")
+  rawResponse           Json?         @map("raw_response")
+  paidAt                DateTime?     @map("paid_at")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// SAVED PRODUCTS (wishlist)
+
+model SavedProduct {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  productId String   @map("product_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@map("saved_products")
+}
+
+model IdempotencyKey {
+  id           String   @id @default(uuid())
+  key          String   @unique
+  userId       String   @map("user_id")
+  endpoint     String
+  requestHash  String   @map("request_hash")
+  statusCode   Int      @map("status_code")
+  responseBody Json     @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("idempotency_keys")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String   @map("actor_user_id")
+  action      String
+  targetType  String   @map("target_type")
+  targetId    String?  @map("target_id")
+  metadata    Json?
+  ip          String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@index([targetType, targetId])
+  @@map("audit_logs")
+}
+
+// ADMIN CONFIGURATION
+
+model AdminConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique @map("config_key")
+  value     String   @map("config_value")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_configs")
+}
+
+// ADMIN PROFILE (public)
+
+model AdminProfile {
+  id        String   @id @default(uuid())
+  userId   String   @unique @map("user_id")
+  fullName String   @map("full_name")
+  email    String   @unique
+  photoUrl String?  @map("photo_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admin_profiles")
+}
+
+model RefreshToken {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  replacedById String?   @unique @map("replaced_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Coupon {
+  id          String     @id @default(uuid())
+  code        String     @unique
+  title       String
+  description String?
+  type        CouponType @default(PERCENT)
+  category    CouponCategory @default(DISCOUNT)
+  value       Decimal    @db.Decimal(14, 2)
+  minSpend    Decimal    @default(0) @map("min_spend") @db.Decimal(14, 2)
+  maxDiscount Decimal?   @map("max_discount") @db.Decimal(14, 2)
+  quota       Int?
+  usedCount   Int        @default(0) @map("used_count")
+  isReward    Boolean    @default(false) @map("is_reward")
+  startsAt    DateTime?  @map("starts_at")
+  expiresAt   DateTime?  @map("expires_at")
+  isActive    Boolean    @default(true) @map("is_active")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  claims UserCoupon[]
+  orders Order[]
+
+  @@index([isActive, expiresAt])
+  @@map("coupons")
+}
+
+model UserCoupon {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  couponId  String    @map("coupon_id")
+  claimedAt DateTime  @default(now()) @map("claimed_at")
+  usedAt    DateTime? @map("used_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, couponId])
+  @@index([userId])
+  @@map("user_coupons")
+}
+
+model Conversation {
+  id            String   @id @default(uuid())
+  buyerId       String   @map("buyer_id")
+  sellerId      String   @map("seller_id")
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  buyer    User      @relation("ConversationBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller   Seller    @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([buyerId, sellerId])
+  @@index([sellerId, lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String    @id @default(uuid())
+  conversationId String    @map("conversation_id")
+  senderId       String    @map("sender_id")
+  body           String?
+  imageUrl       String?   @map("image_url")
+  orderId        String?   @map("order_id")
+  readAt         DateTime? @map("read_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  orderId   String?          @map("order_id")
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model ProductView {
+  id        String   @id @default(uuid())
+  productId String   @map("product_id")
+  sellerId  String   @map("seller_id")
+  userId    String?  @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  seller  Seller  @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([sellerId, createdAt])
+  @@index([productId, createdAt])
+  @@map("product_views")
+}
+
+model Upload {
+  id           String   @id @default(uuid())
+  mimeType     String   @map("mime_type")
+  size         Int
+  data         Bytes
+  uploadedById String?  @map("uploaded_by_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  uploadedBy User? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@map("uploads")
+}
+
+// LAPORAN PENGGUNA
+
+enum ReportTargetType {
+  PRODUCT
+  SELLER
+  REVIEW
+}
+
+enum ReportPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ReportStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+}
+
+// Laporan pengguna atas produk/toko/ulasan yang bermasalah.
+//
+// Sasarannya polimorfik (`targetType` + `targetId`) supaya satu tabel melayani
+// tiga jenis laporan tanpa tiga tabel kembar. Konsekuensinya tidak ada foreign
+// key ke sasaran: itu sebabnya `targetLabel` disimpan sebagai snapshot nama
+// saat dilaporkan, sama alasannya dengan `order_items.product_name`: produk
+// bisa dihapus penjualnya, dan laporan yang isinya tinggal UUID tidak bisa
+// ditindaklanjuti admin.
+model Report {
+  id          String           @id @default(uuid())
+  reporterId  String           @map("reporter_id")
+  targetType  ReportTargetType @map("target_type")
+  targetId    String           @map("target_id")
+  targetLabel String           @map("target_label")
+  reason      String
+  description String?
+  priority    ReportPriority   @default(MEDIUM)
+  status      ReportStatus     @default(OPEN)
+  resolution  String?
+  // Admin penindak, tanpa foreign key, sama alasannya dengan audit_logs.
+  handledById String?          @map("handled_by_id")
+  resolvedAt  DateTime?        @map("resolved_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  reporter User @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  // Satu pelapor tidak boleh menumpuk laporan yang sama berulang kali
+  // penjaga di level database, bukan cuma di service.
+  @@unique([reporterId, targetType, targetId])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@map("reports")
+}
