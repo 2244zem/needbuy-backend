@@ -32,7 +32,7 @@ export function buildApp(): Express {
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      allowedHeaders: true,
+      allowedHeaders: true as any,
     })
   );
   app.use(helmet());
