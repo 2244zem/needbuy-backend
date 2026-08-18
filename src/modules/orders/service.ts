@@ -34,6 +34,17 @@ const orderSelect = {
       price: true,
       subtotal: true,
       review: { select: { id: true, rating: true } },
+      // Foto dipakai kartu pesanan di frontend. productName sudah di-snapshot,
+      // tapi gambarnya tidak — jadi diambil dari produk aslinya saat dibaca.
+      product: {
+        select: {
+          images: {
+            select: { url: true, isPrimary: true },
+            orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
+            take: 1,
+          },
+        },
+      },
     },
   },
   payment: {

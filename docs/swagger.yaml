@@ -2698,6 +2698,10 @@ paths:
         dipesan. Isi order sengaja tidak disalin ke tabel notifikasi supaya
         selalu ikut order aslinya.
       parameters:
+        - name: page
+          in: query
+          description: Halaman ke berapa, 1-based. Dipakai tombol "muat lebih banyak".
+          schema: { type: integer, minimum: 1, default: 1 }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 50, default: 20 }

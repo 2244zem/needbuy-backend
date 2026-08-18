@@ -60,6 +60,7 @@ export async function list(userId: string, query: ListNotificationsQuery) {
     where: { userId, ...(query.unreadOnly ? { readAt: null } : {}) },
     select: listSelect,
     orderBy: { createdAt: "desc" },
+    skip: (query.page - 1) * query.limit,
     take: query.limit,
   });
   return rows.map(toDto);
