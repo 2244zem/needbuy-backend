@@ -17,7 +17,7 @@ Backend saja. TypeScript · Express · Prisma · PostgreSQL · Midtrans Snap (sa
 | [docs/business-rules.md](docs/business-rules.md) | Matching, scoring, budget, order |
 | [docs/security.md](docs/security.md) | Auth, otorisasi, rate limit, pembayaran |
 | [CLAUDE.md](CLAUDE.md) | Konteks proyek yang dikunci |
-| repo `needbuy-submission` | Panduan deploy ke Render + Supabase + Vercel |
+| repo `needbuy-submission` | Panduan deploy ke Railway + Supabase + Vercel |
 
 ---
 
@@ -341,20 +341,20 @@ atau naikkan `RATE_LIMIT_MAX` di `.env` (khusus limiter global).
 
 ## 13. Deploy
 
-Di-deploy ke **Render** (paket gratis), dengan database **Supabase**.
-`render.yaml` di repo ini sudah memuat konfigurasi service-nya:
+Di-deploy ke **Railway**, dengan database **Supabase**. `Dockerfile` di repo ini
+yang dipakai Railway untuk membangun image-nya — begitu Railway melihat
+Dockerfile, builder Nixpacks-nya dilewati:
 
 ```
-build : npm install → prisma generate (postinstall) → tsc
+build : npm ci → prisma generate (postinstall) → npm run build (tsc)
 start : npx prisma migrate deploy && node dist/server.js
 ```
 
 Migrasi database ikut di `start`, jadi skema selalu menyusul kode yang baru
 di-deploy tanpa langkah manual.
 
-Postgres gratis bawaan Render kedaluwarsa setelah 90 hari; Supabase gratis
-tanpa batas waktu. Untuk lomba yang penilaiannya bisa berlangsung setelah
-tenggat, pakai Supabase.
+Supabase dipilih karena paket gratisnya tidak berbatas waktu — penting untuk
+lomba yang penilaiannya bisa berlangsung setelah tenggat.
 
 Supabase butuh **dua** URL. `DATABASE_URL` menunjuk Transaction pooler (port
 6543) untuk query aplikasi, `DIRECT_URL` menunjuk Session pooler (port 5432)
@@ -362,12 +362,15 @@ khusus untuk `prisma migrate` — pooler mode transaction tidak mendukung
 prepared statement dan advisory lock yang dibutuhkan migrasi. Pemisahan ini
 sudah disiapkan di `prisma/schema.prisma` lewat `directUrl`.
 
-**Service gratis Render tidur setelah 15 menit tanpa trafik**, dan request
-pertama setelah itu butuh 30–50 detik. Dua akibatnya di aplikasi ini:
-koneksi WebSocket notifikasi (`/ws/notifications`) putus saat tidur lalu
-tersambung lagi begitu server bangun, dan webhook Midtrans yang datang saat
-server tidur bisa kena timeout. Menembak `/health` tiap 10–14 menit lewat
-UptimeRobot menghilangkan keduanya.
+**Railway memakai model kredit, bukan free tier permanen.** Akun baru dapat
+kredit percobaan; begitu habis, service berhenti. Pantau sisa kredit di
+dashboard, terutama kalau penilaian lomba berlangsung berminggu-minggu setelah
+tenggat. Tidak seperti Render atau Koyeb, service-nya tidak tidur — jadi kredit
+terpakai terus-menerus selama service hidup.
+
+Dockerfile-nya sengaja tidak mengikat diri ke Railway. Kalau kredit habis dan
+harus pindah host, berkas yang sama jalan di Koyeb, Render, Fly, atau VPS mana
+pun tanpa diubah.
 
 Penyimpanan berkas memakai **Supabase Storage**, lewat endpoint
 S3-compatible-nya. Variabel `SUPABASE_*` bersifat opsional: kalau kosong,
@@ -387,8 +390,8 @@ Langkah lengkap dari nol sampai online ada di repo `needbuy-submission`.
 ### Yang tidak boleh masuk GitHub
 
 `.env`, Midtrans **server** key, `GOOGLE_CLIENT_SECRET`, App Password Gmail,
-dan S3 access key Supabase. Semuanya diisi sebagai *environment variable* di dashboard
-Render.
+dan S3 access key Supabase. Semuanya diisi sebagai *variable* di dashboard
+Railway.
 Cek cepat sebelum push:
 
 ```bash
