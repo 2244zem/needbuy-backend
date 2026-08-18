@@ -24,16 +24,18 @@ export function buildApp(): Express {
 
   app.use(requestContext);
   app.use(httpLogger);
-  app.use(helmet());
   app.use(
     cors({
       origin: (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-        return callback(null, false);
+        return callback(new Error("Not allowed by CORS"));
       },
       credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     })
   );
+  app.use(helmet());
   app.use(express.json({ limit: "100kb" }));
   app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 
