@@ -34,5 +34,7 @@ RUN npm run build
 ENV PORT=8000
 EXPOSE 8000
 
-# `npm start` menjalankan `prisma migrate deploy` dulu, baru server.
-CMD ["npm", "start"]
+COPY docker-entrypoint.sh ./
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
+
+CMD ["./docker-entrypoint.sh"]
