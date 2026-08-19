@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../lib/apiError";
+import { logger } from "../../config/logger";
+import { createFor as createNotification, pushCreated } from "../notifications/service";
 import type { ListMessagesQuery } from "./schema";
 
 const messageSelect = {
@@ -120,7 +122,7 @@ export async function sendMessage(
   conversationId: string,
   input: { body?: string; imageUrl?: string }
 ) {
-  await requireParticipant(userId, conversationId);
+  const conversation = await requireParticipant(userId, conversationId);
 
   const [message] = await prisma.$transaction([
     prisma.message.create({
@@ -139,7 +141,40 @@ export async function sendMessage(
     }),
   ]);
 
+  await notifyCounterpart(conversation, userId, input);
+
   return message;
+}
+
+// Notifikasi dikirim ke lawan bicara, bukan ke pengirim. Sengaja di luar
+// transaksi pesan: pesan yang sudah tersimpan tidak boleh ikut gagal hanya
+// karena notifikasinya bermasalah.
+async function notifyCounterpart(
+  conversation: { buyerId: string; seller: { userId: string } },
+  senderId: string,
+  input: { body?: string; imageUrl?: string }
+) {
+  const recipientId =
+    senderId === conversation.buyerId ? conversation.seller.userId : conversation.buyerId;
+  if (recipientId === senderId) return;
+
+  const preview = input.body?.trim()
+    ? input.body.trim().slice(0, 80)
+    : input.imageUrl
+      ? "Mengirim sebuah gambar."
+      : "Mengirim sebuah pesan.";
+
+  try {
+    const created = await createNotification(prisma, {
+      userId: recipientId,
+      type: "CHAT",
+      title: "Pesan baru",
+      message: preview,
+    });
+    await pushCreated([created]);
+  } catch (error) {
+    logger.error({ err: error, conversationId: conversation.buyerId }, "gagal kirim notifikasi chat");
+  }
 }
 
 export async function sendOrderCard(input: {

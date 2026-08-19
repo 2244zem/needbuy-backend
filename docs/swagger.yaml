@@ -4329,7 +4329,8 @@ paths:
 
         SHIPPED dan DELIVERED hanya boleh oleh seller pemilik order.
         COMPLETED hanya oleh buyer pemilik order.
-        PROCESSING datang dari webhook pembayaran, bukan dari endpoint ini.
+        PROCESSING datang dari webhook pembayaran atau dibuat langsung saat
+        checkout COD/NeedPay, bukan dari endpoint ini.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -4357,7 +4358,9 @@ paths:
       tags: [Orders]
       summary: Batalkan order
       description: |
-        Hanya dari WAITING_PAYMENT, dan hanya oleh pemilik order.
+        Hanya dari WAITING_PAYMENT. Boleh oleh pembeli pemilik order maupun
+        seller pemilik toko: pembeli membatalkan karena berubah pikiran,
+        seller menolak karena stok atau alamat bermasalah.
         Stok dikembalikan dalam transaction yang sama.
         Header `Idempotency-Key` wajib, dijalankan dua kali akan
         mengembalikan stok dua kali.

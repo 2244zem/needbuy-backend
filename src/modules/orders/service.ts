@@ -298,18 +298,35 @@ async function assertActorMayTransition(
 ) {
   if (actor.role === "ADMIN") return;
 
-  if (to === "SHIPPED" || to === "DELIVERED") {
+  const isOwningSeller = async () => {
     const seller = await prisma.seller.findUnique({
       where: { userId: actor.userId },
       select: { id: true },
     });
-    if (!seller || seller.id !== order.sellerId) {
+    return Boolean(seller && seller.id === order.sellerId);
+  };
+  const isBuyer = order.userId === actor.userId;
+
+  // PROCESSING dipegang penjual: dialah yang memutuskan orderan diterima dan
+  // mulai disiapkan. Sebelumnya status ini jatuh ke pemeriksaan "harus
+  // pembeli" di bawah, sehingga penjual selalu ditolak 403 dan orderan
+  // mandek di dasbor mereka.
+  if (to === "PROCESSING" || to === "SHIPPED" || to === "DELIVERED") {
+    if (!(await isOwningSeller())) {
       throw AppError.forbidden("Hanya penjual order ini yang bisa mengubah status pengiriman.");
     }
     return;
   }
 
-  if (order.userId !== actor.userId) {
+  // Membatalkan boleh dari dua sisi: pembeli berubah pikiran, atau penjual
+  // menolak karena stok/alamat bermasalah.
+  if (to === "CANCELLED") {
+    if (isBuyer || (await isOwningSeller())) return;
+    throw AppError.forbidden("Order ini bukan milik kamu.");
+  }
+
+  // Sisanya (COMPLETED) hanya pembeli: dialah yang memastikan barang diterima.
+  if (!isBuyer) {
     throw AppError.forbidden("Order ini bukan milik kamu.");
   }
 }

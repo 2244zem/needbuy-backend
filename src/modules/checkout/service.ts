@@ -12,6 +12,8 @@ import { consumeCoupon, grantRandomReward, resolveCoupon } from "../coupons/rede
 import { sendOrderCard } from "../messages/service";
 import { debitForOrder } from "../wallet/service";
 import { pushCreated } from "../notifications/service";
+import { addEvent as addTrackingEvent } from "../orders/tracking.service";
+import { stageForStatus } from "../../lib/tracking";
 import { getCommissionPercent } from "../admin/config.service";
 import type { CheckoutInput } from "./schema";
 
@@ -379,6 +381,21 @@ async function runCheckoutTransaction(userId: string, input: CheckoutInput) {
             ...(isNeedPay ? { paidAt: new Date() } : {}),
           },
         });
+
+        // Order COD dan NeedPay lahir langsung di PROCESSING, jadi tidak
+        // pernah melewati applyTransition yang biasanya menuliskan event
+        // tracking pertama. Tanpa ini halaman lacak paket kosong melompong
+        // dan pembeli mengira pesanannya belum diproses.
+        if (isCod || isNeedPay) {
+          const stage = stageForStatus("PROCESSING");
+          if (stage) {
+            await addTrackingEvent(tx, {
+              orderId: order.id,
+              stage: stage.stage,
+              description: stage.description,
+            });
+          }
+        }
 
         const owner = await tx.seller.findUnique({
           where: { id: sellerId },
