@@ -6,6 +6,7 @@ import { validate } from "../../middleware/validate";
 import * as controller from "./controller";
 import {
   conversationIdParams,
+  listConversationsQuery,
   listMessagesQuery,
   sendMessageSchema,
   startConversationSchema,
@@ -15,7 +16,11 @@ export const messagesRouter = Router();
 
 messagesRouter.use(requireAuth);
 
-messagesRouter.get("/conversations", asyncHandler(controller.listConversations));
+messagesRouter.get(
+  "/conversations",
+  validate({ query: listConversationsQuery }),
+  asyncHandler(controller.listConversations)
+);
 
 messagesRouter.post(
   "/conversations",

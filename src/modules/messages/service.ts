@@ -51,9 +51,23 @@ async function requireParticipant(userId: string, conversationId: string) {
   return conversation;
 }
 
-export async function listConversations(userId: string) {
+/**
+ * `as` menentukan percakapan mana yang dilihat, dan ini penting: satu akun
+ * bisa sekaligus jadi pembeli dan pemilik toko. Sebelumnya semua percakapan
+ * dikembalikan tanpa pandang peran, sehingga kotak masuk pembeli ikut memuat
+ * percakapan tokonya sendiri — dan karena halaman itu selalu menampilkan nama
+ * toko, yang muncul adalah nama toko sendiri di setiap baris.
+ */
+export async function listConversations(userId: string, as?: "buyer" | "seller") {
+  const scope =
+    as === "buyer"
+      ? { buyerId: userId }
+      : as === "seller"
+        ? { seller: { userId } }
+        : { OR: [{ buyerId: userId }, { seller: { userId } }] };
+
   const rows = await prisma.conversation.findMany({
-    where: { OR: [{ buyerId: userId }, { seller: { userId } }] },
+    where: scope,
     orderBy: { lastMessageAt: "desc" },
     select: conversationSelect,
   });
@@ -71,9 +85,43 @@ export async function listConversations(userId: string) {
 
   return rows.map(({ messages, ...conversation }) => ({
     ...conversation,
+    ...counterpartOf(conversation, userId),
     lastMessage: messages[0] ?? null,
     unreadCount: unreadBy.get(conversation.id) ?? 0,
   }));
+}
+
+type ConversationSides = {
+  buyer: { id: string; name: string | null; avatarUrl: string | null };
+  seller: {
+    id: string;
+    storeName: string | null;
+    userId: string;
+    logoUrl: string | null;
+    user: { avatarUrl: string | null } | null;
+  };
+};
+
+/**
+ * Siapa lawan bicaranya ditentukan di sini, bukan ditebak frontend. Halaman
+ * chat dulu memilih sisi secara tetap — pembeli selalu menampilkan toko,
+ * penjual selalu menampilkan pembeli — sehingga begitu perannya terbalik yang
+ * tampil adalah diri sendiri.
+ */
+export function counterpartOf(conversation: ConversationSides, viewerId: string) {
+  const viewerIsBuyer = conversation.buyer.id === viewerId;
+  return {
+    viewerRole: viewerIsBuyer ? ("BUYER" as const) : ("SELLER" as const),
+    counterpart: viewerIsBuyer
+      ? {
+          name: conversation.seller.storeName ?? "Toko",
+          avatarUrl: conversation.seller.logoUrl ?? conversation.seller.user?.avatarUrl ?? null,
+        }
+      : {
+          name: conversation.buyer.name ?? "Pembeli",
+          avatarUrl: conversation.buyer.avatarUrl ?? null,
+        },
+  };
 }
 
 export async function startConversation(userId: string, sellerId: string) {
@@ -94,7 +142,12 @@ export async function startConversation(userId: string, sellerId: string) {
   });
 
   const { messages, ...rest } = conversation;
-  return { ...rest, lastMessage: messages[0] ?? null, unreadCount: 0 };
+  return {
+    ...rest,
+    ...counterpartOf(rest, userId),
+    lastMessage: messages[0] ?? null,
+    unreadCount: 0,
+  };
 }
 
 export async function listMessages(

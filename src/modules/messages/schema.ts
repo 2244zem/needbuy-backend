@@ -13,6 +13,14 @@ export const listMessagesQuery = z
   })
   .strict();
 
+export const listConversationsQuery = z
+  .object({
+    // Peran yang sedang dilihat. Wajib dibedakan karena satu akun bisa
+    // sekaligus jadi pembeli dan pemilik toko.
+    as: z.enum(["buyer", "seller"]).optional(),
+  })
+  .strict();
+
 export const sendMessageSchema = z
   .object({
     body: z.string().trim().min(1).max(2000).optional(),

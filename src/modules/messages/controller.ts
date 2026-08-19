@@ -4,7 +4,14 @@ import { currentUser } from "../../middleware/auth";
 import * as messageService from "./service";
 
 export async function listConversations(req: Request, res: Response) {
-  res.json(ok(await messageService.listConversations(currentUser(req).id)));
+  res.json(
+    ok(
+      await messageService.listConversations(
+        currentUser(req).id,
+        req.query.as as "buyer" | "seller" | undefined
+      )
+    )
+  );
 }
 
 export async function startConversation(req: Request, res: Response) {

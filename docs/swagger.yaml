@@ -3003,11 +3003,24 @@ paths:
       tags: [Messages]
       summary: Daftar percakapan
       description: |
-        Berisi percakapan di mana user hadir sebagai pembeli maupun sebagai
-        penjual, diurutkan dari pesan terbaru.
+        Percakapan diurutkan dari pesan terbaru.
 
-        Tiap percakapan membawa foto kedua pihak: `buyer.avatarUrl`, dan untuk
-        sisi toko `seller.logoUrl` dengan cadangan `seller.user.avatarUrl`.
+        Gunakan `as` untuk memilih peran yang sedang dilihat. Ini penting
+        karena satu akun bisa sekaligus jadi pembeli dan pemilik toko: tanpa
+        `as`, kotak masuk pembeli ikut memuat percakapan tokonya sendiri.
+
+        Tiap percakapan membawa `counterpart` — nama dan foto LAWAN BICARA,
+        sudah ditentukan server — beserta `viewerRole`. Pakai itu untuk
+        menampilkan daftar; jangan memilih sisi `buyer`/`seller` sendiri,
+        karena begitu perannya terbalik yang tampil adalah diri sendiri.
+
+        `buyer` dan `seller` tetap dikirim untuk keperluan lain.
+      parameters:
+        - name: as
+          in: query
+          required: false
+          schema: { type: string, enum: [buyer, seller] }
+          description: Tanpa nilai ini, kedua peran dikembalikan sekaligus.
       responses:
         "200":
           description: Daftar percakapan beserta pesan terakhir dan jumlah belum dibaca
