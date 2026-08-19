@@ -6,7 +6,7 @@ import { canTransition as canTransitionStatus } from "../../lib/orderStatus";
 import { createFor as createNotification, pushCreated } from "../notifications/service";
 import { stageForStatus } from "../../lib/tracking";
 import { addEvent as addTrackingEvent, pushEvent as pushTrackingEvent } from "./tracking.service";
-import { refundForOrder } from "../wallet/service";
+import { creditSellerEarning, refundForOrder } from "../wallet/service";
 
 export { TRANSITIONS, canTransition } from "../../lib/orderStatus";
 
@@ -369,6 +369,9 @@ export async function applyTransition(orderId: string, to: OrderStatus) {
         total: true,
         payment: { select: { method: true, status: true } },
         items: { select: { productId: true, quantity: true } },
+        commissionAmount: true,
+        orderNumber: true,
+        seller: { select: { userId: true } },
       },
     });
     if (!order) throw AppError.notFound("Order nggak ketemu.");
@@ -410,6 +413,21 @@ export async function applyTransition(orderId: string, to: OrderStatus) {
     const data: PrismaTypes.OrderUpdateInput = { status: to };
     if (to === "DELIVERED") data.deliveredAt = new Date();
     if (to === "COMPLETED") data.completedAt = new Date();
+
+    // Pesanan selesai berarti barang sudah dikonfirmasi diterima pembeli.
+    // Baru di titik itu hasil penjualan disetorkan ke NeedPay penjual, sudah
+    // dipotong komisi platform. Aman dari kredit ganda karena COMPLETED
+    // adalah status terminal — tidak ada transisi yang bisa masuk dua kali.
+    if (to === "COMPLETED") {
+      const bersih = order.total.minus(order.commissionAmount);
+      await creditSellerEarning(
+        tx,
+        order.seller.userId,
+        order.id,
+        bersih,
+        `Hasil penjualan order ${order.orderNumber} (dipotong komisi platform)`
+      );
+    }
 
     const updated = await tx.order.update({ where: { id: orderId }, data, select: orderSelect });
 

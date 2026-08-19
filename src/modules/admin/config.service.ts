@@ -1,6 +1,6 @@
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../lib/apiError";
-import { DEFAULT_COMMISSION_PERCENT, isValidCommissionPercent } from "../../lib/commission";
+import { COMMISSION_PERCENT, DEFAULT_COMMISSION_PERCENT, isValidCommissionPercent } from "../../lib/commission";
 
 export const CONFIG_KEYS = {
   SIMULATED_PAYMENT_GATEWAY: "SIMULATED_PAYMENT_GATEWAY_MODE",
@@ -79,8 +79,9 @@ export async function isSimulatedPaymentGatewayEnabled(): Promise<boolean> {
 }
 
 export async function getCommissionPercent(): Promise<number> {
-  const value = await getConfig(CONFIG_KEYS.COMMISSION_PERCENT);
-  if (value === null) return DEFAULT_COMMISSION_PERCENT;
-  const parsed = Number(value);
-  return isValidCommissionPercent(parsed) ? parsed : DEFAULT_COMMISSION_PERCENT;
+  // Tarifnya dikunci di COMMISSION_PERCENT. Nilai yang mungkin pernah
+  // tersimpan di config sengaja tidak dibaca supaya angka yang ditagihkan ke
+  // penjual selalu sama dengan yang ditampilkan di dashboard admin.
+  return COMMISSION_PERCENT;
 }
+

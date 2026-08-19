@@ -4613,7 +4613,7 @@ paths:
                       revenue:
                         type: object
                         properties:
-                          commissionPercent: { type: number, example: 30 }
+                          commissionPercent: { type: number, example: 10 }
                           gmv: { type: number, example: 9548900 }
                           platform: { type: number, example: 2864670 }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -6703,6 +6703,12 @@ paths:
       tags: [NeedPay]
       summary: Riwayat pergerakan saldo
       description: |
+        Jenis mutasi: `TOPUP` isi saldo, `PAYMENT` bayar pesanan pakai saldo,
+        `REFUND` pengembalian saat pesanan batal, `EARNING` hasil penjualan
+        yang masuk otomatis saat pesanan SELESAI (sudah dipotong komisi
+        platform 10%, tanpa pengajuan), dan `WITHDRAWAL` penarikan ke rekening
+        bank — hanya jenis terakhir ini yang butuh persetujuan admin.
+
         Buku besar NeedPay, terbaru dulu. `amount` selalu positif, arah
         pergerakannya ditentukan `type`, bukan tanda angkanya.
       parameters:
@@ -6723,7 +6729,7 @@ paths:
                       type: object
                       properties:
                         id: { type: string, format: uuid }
-                        type: { type: string, enum: [TOPUP, PAYMENT, REFUND] }
+                        type: { type: string, enum: [TOPUP, PAYMENT, REFUND, WITHDRAWAL, EARNING] }
                         status: { type: string, enum: [PENDING, SUCCESS, FAILED, EXPIRED] }
                         amount: { type: string }
                         balanceAfter: { type: string, nullable: true }

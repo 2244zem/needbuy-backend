@@ -206,6 +206,56 @@ export async function debitForOrder(
   return { balance: fresh.balance };
 }
 
+/**
+ * Menyetorkan hasil penjualan ke NeedPay penjual, sudah dipotong komisi.
+ *
+ * Masuk otomatis tanpa pengajuan — yang butuh persetujuan admin hanya
+ * penarikan ke rekening bank. Sebelumnya komisi cuma dicatat di kolom
+ * `orders.commission_amount` untuk laporan dan tidak ada mutasi dompet sama
+ * sekali, jadi penjual tidak pernah benar-benar menerima uangnya.
+ *
+ * Dipanggil sekali saja, saat pesanan berpindah ke COMPLETED. Transisi itu
+ * terminal (COMPLETED tidak punya tujuan berikutnya) sehingga tidak ada jalan
+ * untuk mengkredit dua kali.
+ */
+export async function creditSellerEarning(
+  tx: Prisma.TransactionClient,
+  sellerUserId: string,
+  orderId: string,
+  amount: Prisma.Decimal,
+  note: string
+) {
+  // Pesanan bernilai nol atau yang komisinya menghabiskan seluruh nilai tidak
+  // menghasilkan mutasi: baris dompet bersaldo nol cuma bikin riwayat berisik.
+  if (amount.lte(new Prisma.Decimal(0))) return null;
+
+  const wallet = await ensureWallet(sellerUserId, tx);
+
+  await tx.wallet.update({
+    where: { id: wallet.id },
+    data: { balance: { increment: amount } },
+  });
+
+  const fresh = await tx.wallet.findUniqueOrThrow({
+    where: { id: wallet.id },
+    select: { balance: true },
+  });
+
+  await tx.walletTransaction.create({
+    data: {
+      walletId: wallet.id,
+      type: "EARNING",
+      status: "SUCCESS",
+      amount,
+      balanceAfter: fresh.balance,
+      orderId,
+      note,
+    },
+  });
+
+  return { balance: fresh.balance };
+}
+
 export async function refundForOrder(
   tx: Prisma.TransactionClient,
   userId: string,

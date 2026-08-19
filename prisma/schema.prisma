@@ -187,6 +187,10 @@ enum WalletTxType {
   // penarikan adalah mutasi dompet seperti yang lain, dan menaruhnya di buku
   // besar yang sama membuat saldo tetap punya satu sumber kebenaran.
   WITHDRAWAL
+  // Pemasukan penjual dari pesanan yang selesai, sudah dipotong komisi
+  // platform. Masuk otomatis tanpa pengajuan: yang butuh persetujuan hanya
+  // penarikan ke rekening bank.
+  EARNING
 }
 
 enum WalletTxStatus {
