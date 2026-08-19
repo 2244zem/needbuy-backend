@@ -40,7 +40,12 @@ const conversationSelect = {
 async function requireParticipant(userId: string, conversationId: string) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, OR: [{ buyerId: userId }, { seller: { userId } }] },
-    select: { id: true, buyerId: true, seller: { select: { userId: true } } },
+    select: {
+      id: true,
+      buyerId: true,
+      buyer: { select: { name: true } },
+      seller: { select: { userId: true, storeName: true } },
+    },
   });
   if (!conversation) throw AppError.notFound("Percakapan nggak ketemu.");
   return conversation;
@@ -150,13 +155,23 @@ export async function sendMessage(
 // transaksi pesan: pesan yang sudah tersimpan tidak boleh ikut gagal hanya
 // karena notifikasinya bermasalah.
 async function notifyCounterpart(
-  conversation: { buyerId: string; seller: { userId: string } },
+  conversation: {
+    buyerId: string;
+    buyer: { name: string | null };
+    seller: { userId: string; storeName: string | null };
+  },
   senderId: string,
   input: { body?: string; imageUrl?: string }
 ) {
-  const recipientId =
-    senderId === conversation.buyerId ? conversation.seller.userId : conversation.buyerId;
+  const dariPembeli = senderId === conversation.buyerId;
+  const recipientId = dariPembeli ? conversation.seller.userId : conversation.buyerId;
   if (recipientId === senderId) return;
+
+  // Judul menyebut pengirimnya. "Pesan baru" saja tidak memberi tahu apa pun
+  // yang belum terbaca dari label notifikasinya sendiri.
+  const pengirim = dariPembeli
+    ? conversation.buyer.name?.trim()
+    : conversation.seller.storeName?.trim();
 
   const preview = input.body?.trim()
     ? input.body.trim().slice(0, 80)
@@ -168,7 +183,7 @@ async function notifyCounterpart(
     const created = await createNotification(prisma, {
       userId: recipientId,
       type: "CHAT",
-      title: "Pesan baru",
+      title: pengirim ? `Pesan dari ${pengirim}` : "Pesan baru",
       message: preview,
     });
     await pushCreated([created]);

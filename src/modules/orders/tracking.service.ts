@@ -41,7 +41,11 @@ export function pushEvent(userId: string, orderId: string, event: unknown) {
 
 export async function getForOrder(userId: string, orderId: string) {
   const order = await prisma.order.findFirst({
-    where: { id: orderId, userId },
+    // Penjual pemilik order ikut boleh melihat: itu pengiriman dia sendiri,
+    // dan kartu pesanan yang dikirim pembeli lewat chat mengarah ke halaman
+    // lacak yang sama. Sebelumnya hanya pembeli yang lolos, sehingga penjual
+    // yang membuka kartu itu selalu dapat "Pesanan nggak ketemu".
+    where: { id: orderId, OR: [{ userId }, { seller: { userId } }] },
     select: {
       id: true,
       orderNumber: true,

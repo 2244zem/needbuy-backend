@@ -6779,6 +6779,10 @@ paths:
         tahap TERJAUH yang pernah tercapai, bukan jejak terakhir yang ditulis,
         supaya catatan susulan penjual tidak membuat timeline mundur.
 
+        Bisa dibuka pembeli pemilik order MAUPUN penjual pemilik toko: itu
+        pengiriman si penjual sendiri, dan kartu pesanan yang dikirim lewat
+        chat mengarah ke halaman lacak yang sama untuk kedua pihak.
+
         Update realtime dikirim lewat socket notifikasi yang sudah ada
         (`/ws/notifications`) sebagai event `tracking`.
 
