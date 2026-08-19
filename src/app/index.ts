@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import swaggerUi from "swagger-ui-express";
 import YAML from "yaml";
-import { allowedOrigins, env } from "../config/env";
+import { allowedOrigins, env, isOriginAllowed } from "../config/env";
 import { logger } from "../config/logger";
 import { prisma } from "../config/prisma";
 import { ok } from "../lib/response";
@@ -27,8 +27,9 @@ export function buildApp(): Express {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error("Not allowed by CORS"));
+        if (!origin || isOriginAllowed(origin)) return callback(null, true);
+        logger.warn({ origin, allowedOrigins }, "origin ditolak CORS");
+        return callback(null, false);
       },
       credentials: true,
     })

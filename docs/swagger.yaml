@@ -26,7 +26,9 @@ info:
 
     Token dikirim lewat query karena WebSocket API di browser tidak bisa
     mengirim header `Authorization`. Origin diperiksa terhadap
-    `ALLOWED_ORIGINS` saat handshake. Server mengirim frame JSON:
+    `ALLOWED_ORIGINS` (ditambah `FRONTEND_URL`) saat handshake, dibandingkan
+    tanpa trailing slash dan tanpa beda huruf besar-kecil. Server mengirim
+    frame JSON:
 
     - `{ "event": "unread-count", "data": { "unreadCount": 3 } }`: dikirim
       saat connect dan setiap kali jumlah belum dibaca berubah.

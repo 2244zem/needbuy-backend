@@ -76,9 +76,23 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 
-export const allowedOrigins = env.ALLOWED_ORIGINS.split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+// Origin dibandingkan setelah dinormalkan: browser mengirim header `Origin`
+// tanpa trailing slash dan dengan host huruf kecil, sedangkan nilai di env
+// sering ditulis "https://contoh.app/" sehingga perbandingan mentah meleset.
+function normalizeOrigin(value: string): string {
+  return value.trim().replace(/\/+$/, "").toLowerCase();
+}
+
+// FRONTEND_URL ikut diizinkan otomatis: origin yang dipakai untuk redirect
+// OAuth pasti juga yang memanggil API, jadi tidak perlu didaftar dua kali.
+export const allowedOrigins = [...env.ALLOWED_ORIGINS.split(","), env.FRONTEND_URL]
+  .map(normalizeOrigin)
+  .filter(Boolean)
+  .filter((origin, index, list) => list.indexOf(origin) === index);
+
+export function isOriginAllowed(origin: string): boolean {
+  return allowedOrigins.includes(normalizeOrigin(origin));
+}
 
 export const isProduction = env.NODE_ENV === "production";
 export const isTest = env.NODE_ENV === "test";

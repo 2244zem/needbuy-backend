@@ -2,7 +2,7 @@ import type { UserRole } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import type { Server } from "node:http";
 import { WebSocketServer } from "ws";
-import { allowedOrigins, env } from "../../config/env";
+import { env, isOriginAllowed } from "../../config/env";
 import { logger } from "../../config/logger";
 import { register } from "./hub";
 import { unreadCount } from "./service";
@@ -23,7 +23,8 @@ export function attachNotificationSocket(server: Server): WebSocketServer {
     }
 
     const origin = request.headers.origin;
-    if (origin && !allowedOrigins.includes(origin)) {
+    if (origin && !isOriginAllowed(origin)) {
+      logger.warn({ origin }, "origin ditolak saat upgrade WebSocket");
       socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
