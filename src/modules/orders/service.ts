@@ -412,7 +412,12 @@ export async function applyTransition(orderId: string, to: OrderStatus) {
 
     const data: PrismaTypes.OrderUpdateInput = { status: to };
     if (to === "DELIVERED") data.deliveredAt = new Date();
-    if (to === "COMPLETED") data.completedAt = new Date();
+    if (to === "COMPLETED") {
+      data.completedAt = new Date();
+      // Ditandai lunas di transaksi yang sama dengan pengkreditannya, jadi
+      // penyapuan berkala tidak akan membayar pesanan ini lagi.
+      data.settledAt = new Date();
+    }
 
     // Pesanan selesai berarti barang sudah dikonfirmasi diterima pembeli.
     // Baru di titik itu hasil penjualan disetorkan ke NeedPay penjual, sudah

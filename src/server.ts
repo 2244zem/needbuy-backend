@@ -3,6 +3,7 @@ import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { prisma } from "./config/prisma";
 import { attachNotificationSocket, NOTIFICATION_WS_PATH } from "./modules/notifications/ws";
+import { settleCompletedOrders } from "./modules/wallet/service";
 
 const app = buildApp();
 
@@ -17,8 +18,29 @@ const server = app.listen(env.PORT, "0.0.0.0", () => {
 
 const wss = attachNotificationSocket(server);
 
+// Pencairan hasil penjualan disapu tiap jam. Pengkreditan sebenarnya sudah
+// terjadi langsung saat pesanan selesai; ini jaring pengaman untuk pesanan
+// yang statusnya sempat berubah tapi dompetnya belum terisi karena proses
+// mati di tengah jalan.
+const SETTLEMENT_INTERVAL_MS = 60 * 60 * 1000;
+
+async function jalankanPencairan() {
+  try {
+    const hasil = await settleCompletedOrders();
+    if (hasil.settled > 0) logger.info(hasil, "pencairan hasil penjualan");
+  } catch (error) {
+    logger.error({ err: error }, "penyapuan pencairan gagal");
+  }
+}
+
+// Sekali saat start supaya sisa dari proses sebelumnya tidak menunggu sejam.
+void jalankanPencairan();
+const settlementTimer = setInterval(jalankanPencairan, SETTLEMENT_INTERVAL_MS);
+settlementTimer.unref();
+
 async function shutdown(signal: string) {
   logger.info({ signal }, "shutting down");
+  clearInterval(settlementTimer);
   for (const client of wss.clients) client.close(1001, "server shutting down");
   wss.close();
   server.close(async () => {

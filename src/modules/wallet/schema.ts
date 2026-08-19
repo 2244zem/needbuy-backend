@@ -34,3 +34,24 @@ export const withdrawalSchema = z
 
 export type TopupInput = z.infer<typeof topupSchema>;
 export type WithdrawalInput = z.infer<typeof withdrawalSchema>;
+
+// PIN 6 digit angka: cukup untuk menahan tebakan iseng, dan gampang diingat.
+const pin = z.string().regex(/^\d{6}$/, "PIN harus 6 angka");
+
+export const setPinSchema = z
+  .object({ newPin: pin, currentPin: pin.optional() })
+  .strict();
+
+export const lookupAccountQuery = z
+  .object({ accountNumber: z.string().trim().min(4).max(20) })
+  .strict();
+
+export const transferSchema = z
+  .object({
+    toAccountNumber: z.string().trim().min(4).max(20),
+    // Batas bawah menahan transfer receh yang cuma bikin riwayat berisik.
+    amount: z.number().int().positive().min(1000).max(100_000_000),
+    pin,
+    note: z.string().trim().max(120).optional(),
+  })
+  .strict();

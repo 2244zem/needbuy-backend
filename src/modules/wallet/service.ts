@@ -1,10 +1,21 @@
 import { Prisma } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
-import { withExternalCall } from "../../config/logger";
+import { logger, withExternalCall } from "../../config/logger";
 import { snap } from "../../config/midtrans";
 import { AppError } from "../../lib/apiError";
 import { generateTopupOrderId } from "../../lib/needpay";
 import { buildMeta, toSkipTake } from "../../lib/pagination";
+
+// Nomor rekening dan PIN ikut dibawa karena hampir semua pemakai ensureWallet
+// membutuhkannya; hash PIN tidak pernah dikirim ke klien, hanya dibandingkan.
+const walletSelect = {
+  id: true,
+  balance: true,
+  accountNumber: true,
+  pinHash: true,
+} satisfies Prisma.WalletSelect;
 
 const txSelect = {
   id: true,
@@ -27,19 +38,27 @@ const txSelect = {
 export async function ensureWallet(userId: string, tx: Prisma.TransactionClient | typeof prisma = prisma) {
   const existing = await tx.wallet.findUnique({
     where: { userId },
-    select: { id: true, balance: true },
+    select: walletSelect,
   });
   if (existing) return existing;
 
   return tx.wallet.create({
     data: { userId },
-    select: { id: true, balance: true },
+    select: walletSelect,
   });
 }
 
 export async function getWallet(userId: string) {
   const wallet = await ensureWallet(userId);
-  return { id: wallet.id, balance: wallet.balance };
+  // Nomor rekening ikut dikirim supaya bisa ditampilkan di bawah saldo dan
+  // disebut orang lain saat transfer. Hash PIN sengaja tidak ikut — yang
+  // dibutuhkan klien hanya tahu sudah diatur atau belum.
+  return {
+    id: wallet.id,
+    balance: wallet.balance,
+    accountNumber: wallet.accountNumber,
+    hasPin: Boolean(wallet.pinHash),
+  };
 }
 
 export async function listTransactions(
@@ -218,6 +237,134 @@ export async function debitForOrder(
  * terminal (COMPLETED tidak punya tujuan berikutnya) sehingga tidak ada jalan
  * untuk mengkredit dua kali.
  */
+// ── PIN transfer ─────────────────────────────────────────────────────────────
+
+/** Menutupi nomor rekening selain empat digit terakhir. */
+function samarkan(nomor: string): string {
+  return nomor.length <= 4 ? nomor : `${"*".repeat(nomor.length - 4)}${nomor.slice(-4)}`;
+}
+
+export async function getPinStatus(userId: string) {
+  const wallet = await ensureWallet(userId);
+  return { hasPin: Boolean(wallet.pinHash) };
+}
+
+/**
+ * Mengatur atau mengganti PIN transfer.
+ *
+ * PIN lama wajib disertakan kalau sudah pernah dibuat — tanpa itu, siapa pun
+ * yang sempat memegang sesi bisa memasang PIN baru dan menguras saldo.
+ */
+export async function setPin(userId: string, newPin: string, currentPin?: string) {
+  const wallet = await ensureWallet(userId);
+
+  if (wallet.pinHash) {
+    if (!currentPin) {
+      throw AppError.badRequest("Masukkan PIN lama kamu dulu.", "CURRENT_PIN_REQUIRED");
+    }
+    const cocok = await bcrypt.compare(currentPin, wallet.pinHash);
+    if (!cocok) throw AppError.conflict("PIN lama salah.", "INVALID_PIN");
+  }
+
+  const pinHash = await bcrypt.hash(newPin, env.BCRYPT_ROUNDS);
+  await prisma.wallet.update({ where: { id: wallet.id }, data: { pinHash } });
+  return { hasPin: true };
+}
+
+// ── Transfer antar-pengguna ──────────────────────────────────────────────────
+
+/** Mencari pemilik sebuah nomor rekening, buat dikonfirmasi sebelum kirim. */
+export async function lookupAccount(accountNumber: string) {
+  const wallet = await prisma.wallet.findUnique({
+    where: { accountNumber },
+    select: { accountNumber: true, user: { select: { name: true } } },
+  });
+  if (!wallet) throw AppError.notFound("Nomor rekening NeedPay nggak ketemu.");
+  return { accountNumber: wallet.accountNumber, name: wallet.user.name };
+}
+
+/**
+ * Memindahkan saldo antar-dompet dalam satu transaksi.
+ *
+ * Pengurangan saldo pengirim memakai updateMany bersyarat `balance >= amount`,
+ * bukan baca-lalu-tulis: dua transfer yang berjalan bersamaan tidak bisa
+ * sama-sama lolos dan membuat saldo minus.
+ */
+export async function transfer(
+  senderUserId: string,
+  input: { toAccountNumber: string; amount: number; pin: string; note?: string }
+) {
+  const amount = new Prisma.Decimal(input.amount);
+  if (amount.lte(new Prisma.Decimal(0))) {
+    throw AppError.badRequest("Nominal transfer harus lebih dari nol.", "INVALID_AMOUNT");
+  }
+
+  const pengirim = await ensureWallet(senderUserId);
+  if (!pengirim.pinHash) {
+    throw AppError.badRequest("Atur PIN NeedPay kamu dulu sebelum transfer.", "PIN_NOT_SET");
+  }
+  const pinCocok = await bcrypt.compare(input.pin, pengirim.pinHash);
+  if (!pinCocok) throw AppError.conflict("PIN salah.", "INVALID_PIN");
+
+  const penerima = await prisma.wallet.findUnique({
+    where: { accountNumber: input.toAccountNumber },
+    select: { id: true, userId: true, user: { select: { name: true } } },
+  });
+  if (!penerima) throw AppError.notFound("Nomor rekening tujuan nggak ketemu.");
+  if (penerima.id === pengirim.id) {
+    throw AppError.badRequest("Nggak bisa transfer ke rekening sendiri.", "SELF_TRANSFER");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const terpotong = await tx.wallet.updateMany({
+      where: { id: pengirim.id, balance: { gte: amount } },
+      data: { balance: { decrement: amount } },
+    });
+    if (terpotong.count === 0) {
+      throw AppError.badRequest("Saldo NeedPay kamu nggak cukup.", "INSUFFICIENT_BALANCE");
+    }
+
+    await tx.wallet.update({
+      where: { id: penerima.id },
+      data: { balance: { increment: amount } },
+    });
+
+    const [saldoPengirim, saldoPenerima] = await Promise.all([
+      tx.wallet.findUniqueOrThrow({ where: { id: pengirim.id }, select: { balance: true } }),
+      tx.wallet.findUniqueOrThrow({ where: { id: penerima.id }, select: { balance: true } }),
+    ]);
+
+    const catatan = input.note?.trim();
+    await tx.walletTransaction.createMany({
+      data: [
+        {
+          walletId: pengirim.id,
+          type: "TRANSFER_OUT",
+          status: "SUCCESS",
+          amount,
+          balanceAfter: saldoPengirim.balance,
+          note: `Transfer ke ${penerima.user.name} (${samarkan(input.toAccountNumber)})${catatan ? ` - ${catatan}` : ""}`,
+        },
+        {
+          walletId: penerima.id,
+          type: "TRANSFER_IN",
+          status: "SUCCESS",
+          amount,
+          balanceAfter: saldoPenerima.balance,
+          note: `Transfer dari ${samarkan(pengirim.accountNumber)}${catatan ? ` - ${catatan}` : ""}`,
+        },
+      ],
+    });
+
+    return {
+      transferred: true,
+      amount: amount.toString(),
+      balance: saldoPengirim.balance,
+      to: { accountNumber: input.toAccountNumber, name: penerima.user.name },
+    };
+  });
+}
+
 export async function creditSellerEarning(
   tx: Prisma.TransactionClient,
   sellerUserId: string,
@@ -423,4 +570,59 @@ export async function decideWithdrawal(
       select: withdrawalSelect,
     });
   });
+}
+
+// ── Pencairan berkala ────────────────────────────────────────────────────────
+
+/**
+ * Menyapu pesanan yang sudah SELESAI tapi hasil penjualannya belum masuk ke
+ * dompet penjual, lalu membayarnya.
+ *
+ * Pengkreditan sebenarnya sudah terjadi langsung saat pesanan selesai. Sapuan
+ * ini jaring pengaman: kalau proses mati di tengah jalan setelah status
+ * berubah tapi sebelum dompet terisi, uang penjual tidak menggantung sampai
+ * ada yang menyadarinya.
+ *
+ * Aman diulang berapa kali pun — `settledAt` diklaim lewat updateMany
+ * bersyarat, jadi dua sapuan yang berjalan bersamaan tidak bisa sama-sama
+ * membayar pesanan yang sama.
+ */
+export async function settleCompletedOrders(limit = 200) {
+  const kandidat = await prisma.order.findMany({
+    where: { status: "COMPLETED", settledAt: null },
+    select: {
+      id: true,
+      orderNumber: true,
+      total: true,
+      commissionAmount: true,
+      seller: { select: { userId: true } },
+    },
+    take: limit,
+  });
+
+  let dibayar = 0;
+  for (const order of kandidat) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const diklaim = await tx.order.updateMany({
+          where: { id: order.id, settledAt: null },
+          data: { settledAt: new Date() },
+        });
+        if (diklaim.count === 0) return; // sapuan lain sudah membayarnya
+
+        await creditSellerEarning(
+          tx,
+          order.seller.userId,
+          order.id,
+          order.total.minus(order.commissionAmount),
+          `Hasil penjualan order ${order.orderNumber} (dipotong komisi platform)`
+        );
+        dibayar += 1;
+      });
+    } catch (error) {
+      logger.error({ err: error, orderId: order.id }, "gagal cairkan hasil penjualan");
+    }
+  }
+
+  return { candidates: kandidat.length, settled: dibayar };
 }

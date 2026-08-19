@@ -191,6 +191,10 @@ enum WalletTxType {
   // platform. Masuk otomatis tanpa pengajuan: yang butuh persetujuan hanya
   // penarikan ke rekening bank.
   EARNING
+  // Transfer saldo antar-pengguna. Dicatat dua baris: keluar di pengirim,
+  // masuk di penerima, supaya kedua buku besar tetap bisa dibaca sendiri.
+  TRANSFER_OUT
+  TRANSFER_IN
 }
 
 enum WalletTxStatus {
@@ -204,6 +208,11 @@ model Wallet {
   id        String   @id @default(uuid())
   userId    String   @unique @map("user_id")
   balance   Decimal  @default(0) @db.Decimal(14, 2)
+  // Nomor rekening NeedPay yang disebut saat transfer antar-pengguna.
+  // Dihasilkan database lewat sequence supaya unik tanpa perlu diundi ulang.
+  accountNumber String @unique @default(dbgenerated("('NP'::text || lpad((nextval('needpay_account_seq'::regclass))::text, 10, '0'::text))")) @map("account_number") @db.VarChar(20)
+  // Hash PIN transfer. Null berarti pemilik belum pernah mengaturnya.
+  pinHash   String?  @map("pin_hash")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -612,6 +621,9 @@ model Order {
   commissionAmount  Decimal @default(0) @map("commission_amount") @db.Decimal(14, 2)
   deliveredAt  DateTime?   @map("delivered_at")
   completedAt  DateTime?   @map("completed_at")
+  // Kapan hasil penjualan pesanan ini masuk ke dompet penjual. Null berarti
+  // belum dibayarkan; dipakai penyapuan berkala supaya tidak membayar dua kali.
+  settledAt    DateTime?   @map("settled_at")
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 

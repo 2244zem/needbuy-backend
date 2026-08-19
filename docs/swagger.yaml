@@ -6698,13 +6698,103 @@ paths:
                       balance: { type: string, example: "150000.00" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /wallet/pin:
+    get:
+      tags: [NeedPay]
+      summary: Cek apakah PIN sudah diatur
+      responses:
+        "200":
+          description: "{ hasPin: boolean }"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [NeedPay]
+      summary: Atur atau ganti PIN transfer
+      description: |
+        PIN 6 angka, dipakai untuk menyetujui transfer antar-pengguna.
+        `currentPin` wajib kalau PIN sudah pernah dibuat — tanpa itu siapa pun
+        yang sempat memegang sesi bisa memasang PIN baru dan menguras saldo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPin]
+              additionalProperties: false
+              properties:
+                newPin: { type: string, pattern: "^[0-9]{6}$" }
+                currentPin: { type: string, pattern: "^[0-9]{6}$" }
+      responses:
+        "200": { description: "PIN tersimpan" }
+        "400": { description: "PIN lama belum diisi (CURRENT_PIN_REQUIRED)" }
+        "409": { description: "PIN lama salah (INVALID_PIN)" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /wallet/lookup:
+    get:
+      tags: [NeedPay]
+      summary: Cari pemilik nomor rekening
+      description: |
+        Dipakai untuk menampilkan nama penerima sebelum transfer dikirim,
+        supaya salah ketik nomor ketahuan sebelum uang berpindah.
+      parameters:
+        - name: accountNumber
+          in: query
+          required: true
+          schema: { type: string, minLength: 4, maxLength: 20 }
+      responses:
+        "200":
+          description: "{ accountNumber, name }"
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /wallet/transfer:
+    post:
+      tags: [NeedPay]
+      summary: Transfer saldo ke pengguna lain
+      description: |
+        Memindahkan saldo antar-dompet dalam satu transaksi. Butuh PIN.
+
+        Header `Idempotency-Key` WAJIB: transfer yang terkirim dua kali karena
+        klik dobel atau retry jaringan berarti uang berpindah dua kali.
+
+        Saldo pengirim dipotong lewat pembaruan bersyarat, jadi dua transfer
+        yang berjalan bersamaan tidak bisa sama-sama lolos dan membuat saldo
+        minus. Tercatat dua baris: TRANSFER_OUT di pengirim, TRANSFER_IN di
+        penerima.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toAccountNumber, amount, pin]
+              additionalProperties: false
+              properties:
+                toAccountNumber: { type: string }
+                amount: { type: integer, minimum: 1000, maximum: 100000000 }
+                pin: { type: string, pattern: "^[0-9]{6}$" }
+                note: { type: string, maxLength: 120 }
+      responses:
+        "200": { description: "Transfer berhasil" }
+        "400":
+          description: >
+            Saldo kurang (INSUFFICIENT_BALANCE), PIN belum diatur (PIN_NOT_SET),
+            atau tujuan sama dengan rekening sendiri (SELF_TRANSFER)
+        "404": { description: "Rekening tujuan nggak ketemu" }
+        "409": { description: "PIN salah (INVALID_PIN)" }
+
   /wallet/transactions:
     get:
       tags: [NeedPay]
       summary: Riwayat pergerakan saldo
       description: |
         Jenis mutasi: `TOPUP` isi saldo, `PAYMENT` bayar pesanan pakai saldo,
-        `REFUND` pengembalian saat pesanan batal, `EARNING` hasil penjualan
+        `REFUND` pengembalian saat pesanan batal, `TRANSFER_OUT`/`TRANSFER_IN` transfer antar-pengguna, `EARNING` hasil penjualan
         yang masuk otomatis saat pesanan SELESAI (sudah dipotong komisi
         platform 10%, tanpa pengajuan), dan `WITHDRAWAL` penarikan ke rekening
         bank — hanya jenis terakhir ini yang butuh persetujuan admin.
@@ -6729,7 +6819,7 @@ paths:
                       type: object
                       properties:
                         id: { type: string, format: uuid }
-                        type: { type: string, enum: [TOPUP, PAYMENT, REFUND, WITHDRAWAL, EARNING] }
+                        type: { type: string, enum: [TOPUP, PAYMENT, REFUND, WITHDRAWAL, EARNING, TRANSFER_OUT, TRANSFER_IN] }
                         status: { type: string, enum: [PENDING, SUCCESS, FAILED, EXPIRED] }
                         amount: { type: string }
                         balanceAfter: { type: string, nullable: true }

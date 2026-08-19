@@ -29,3 +29,21 @@ export async function topup(req: Request, res: Response) {
 export async function syncTopup(req: Request, res: Response) {
   res.json(ok(await paymentsService.syncTopup(currentUser(req).id, req.params.id)));
 }
+
+export async function pinStatus(req: Request, res: Response) {
+  res.json(ok(await walletService.getPinStatus(currentUser(req).id)));
+}
+
+export async function setPin(req: Request, res: Response) {
+  res.json(
+    ok(await walletService.setPin(currentUser(req).id, req.body.newPin, req.body.currentPin))
+  );
+}
+
+export async function lookupAccount(req: Request, res: Response) {
+  res.json(ok(await walletService.lookupAccount(String(req.query.accountNumber))));
+}
+
+export async function transfer(req: Request, res: Response) {
+  res.json(ok(await walletService.transfer(currentUser(req).id, req.body)));
+}
