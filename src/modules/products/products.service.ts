@@ -95,22 +95,51 @@ function searchWhere(q: string): Prisma.ProductWhereInput {
 // bukan isi paragraf promosi. Cocok persis dan cocok di awal nama diberi
 // bobot tertinggi supaya "laptop" tidak kalah oleh produk yang kebetulan
 // menyebut "laptop" berkali-kali di deskripsi.
-export function relevanceScore(product: { name: string; description: string | null; soldCount: number; rating: unknown }, q: string): number {
+export function relevanceScore(
+  product: {
+    name: string;
+    description: string | null;
+    soldCount: number;
+    rating: unknown;
+    category?: { name: string; slug: string } | null;
+  },
+  q: string
+): number {
   const name = product.name.toLowerCase();
   const desc = (product.description ?? "").toLowerCase();
+  const categoryName = (product.category?.name ?? "").toLowerCase();
+  const categorySlug = (product.category?.slug ?? "").toLowerCase();
   const query = q.toLowerCase().trim();
   const terms = searchTerms(q);
 
   let score = 0;
+
+  // Nama persis sama jelas yang dimaksud.
   if (name === query) score += 1000;
   else if (name.startsWith(query)) score += 500;
-  else if (name.includes(query)) score += 300;
 
+  // Kata kunci yang PERSIS sebuah kategori berarti user menyebut jenis barang,
+  // bukan satu produk tertentu. Bobotnya sengaja di atas "nama memuat frasa"
+  // supaya pencarian "laptop" dipimpin laptop sungguhan, bukan "Tas Ransel
+  // Laptop" yang kebetulan menyebut kata itu di namanya. Bobot ini tidak
+  // diberikan untuk kecocokan sebagian, supaya pencarian spesifik seperti
+  // "macbook" tetap dimenangkan produknya sendiri, bukan semua isi kategori.
+  if (query === categoryName || query === categorySlug) score += 450;
+
+  if (name.includes(query)) score += 300;
+
+  const nameWords = name.split(/[^a-z0-9]+/i).filter(Boolean);
   for (const term of terms) {
     if (name.includes(term)) score += 60;
     // Cocok di awal sebuah kata lebih berarti daripada kebetulan tersisip
     // di tengah kata lain: "top" di "laptop" jangan sekuat "top handle".
-    if (name.split(/[^a-z0-9]+/i).some((word) => word.startsWith(term))) score += 40;
+    if (nameWords.some((word) => word.startsWith(term))) score += 40;
+    // Sengaja lebih berat daripada nama (60+40): berada DI DALAM sebuah
+    // kategori adalah pernyataan yang lebih kuat daripada sekadar menyebut
+    // katanya. Tanpa ini "laptop gaming" dimenangkan "Cooling Pad Laptop"
+    // yang menyebut kedua kata itu, mengalahkan laptop gaming sungguhan yang
+    // namanya cuma "Acer Nitro V 15".
+    if (categoryName.includes(term) || categorySlug.includes(term)) score += 150;
     if (desc.includes(term)) score += 8;
   }
 
