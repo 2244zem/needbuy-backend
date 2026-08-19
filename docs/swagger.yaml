@@ -4320,6 +4320,65 @@ paths:
           description: Detail order
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /ai/search/filters:
+    post:
+      tags: [AI]
+      summary: Terjemahkan kalimat pencarian jadi filter
+      description: |
+        Mengubah kalimat bebas seperti "laptop gaming murah di bawah 15 juta"
+        menjadi filter terstruktur sekaligus memilih algoritma pengurutan yang
+        paling melayani maksud user.
+
+        Ditafsirkan oleh Gemini. Kalau `GEMINI_API_KEY` tidak diset, Gemini
+        lambat, atau balasannya tidak terbaca, endpoint tetap membalas 200
+        memakai penguraian heuristik dan menandainya lewat `source`.
+        Pencarian tidak pernah ikut mati karena layanan AI bermasalah.
+
+        `categorySlug` selalu divalidasi terhadap kategori yang benar-benar
+        ada; slug karangan dibuang jadi null.
+
+        Tidak butuh login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              additionalProperties: false
+              properties:
+                query: { type: string, minLength: 1, maxLength: 300 }
+      responses:
+        "200":
+          description: Filter hasil penafsiran
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      query: { type: string }
+                      filters:
+                        type: object
+                        properties:
+                          keywords: { type: string }
+                          categorySlug: { type: string, nullable: true }
+                          minPrice: { type: integer, nullable: true }
+                          maxPrice: { type: integer, nullable: true }
+                          conditions:
+                            type: array
+                            items: { type: string, enum: [BARU, BEKAS] }
+                          onSale: { type: boolean }
+                          sort:
+                            type: string
+                            enum: [relevance, newest, price_asc, price_desc, rating, sold]
+                      reason: { type: string }
+                      source: { type: string, enum: [gemini, heuristic] }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
   /orders/{id}/status:
     patch:
       tags: [Orders]

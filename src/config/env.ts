@@ -40,6 +40,11 @@ const envSchema = z.object({
 
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
 
+  // Gemini dipakai untuk menerjemahkan kalimat pencarian jadi filter. Opsional:
+  // tanpa kunci ini pencarian tetap jalan memakai penguraian heuristik.
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-2.0-flash"),
+
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().url().optional(),

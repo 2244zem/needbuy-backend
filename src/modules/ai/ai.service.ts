@@ -12,6 +12,7 @@ import { parseBudget } from "../../lib/parseBudget";
 import { auditProduct, type ProductForAudit } from "../../lib/productAudit";
 import { routeQuestion } from "../../lib/productQuestion";
 import { findSimilarNeeds } from "../../lib/similarNeeds";
+import { generateJson } from "../../lib/gemini";
 import { normalizeSpecKey } from "../../lib/specBase";
 import { checkSuitability } from "../../lib/suitability";
 import type { Attribute } from "../../lib/attributeMatch";
@@ -369,4 +370,127 @@ export async function answerProductQuestion(input: ProductQuestionInput) {
         "Pertanyaan ini di luar data yang tersedia. Coba tanyakan salah satu hal berikut."
       );
   }
+}
+
+// ── Filter pencarian ─────────────────────────────────────────────────────────
+// Menerjemahkan kalimat bebas ("laptop gaming murah di bawah 15 juta") menjadi
+// filter terstruktur plus algoritma pengurutan yang paling masuk akal untuk
+// maksud itu. Gemini yang menafsirkan; kalau tidak dikonfigurasi atau gagal,
+// penguraian heuristik yang sudah ada mengambil alih supaya pencarian tidak
+// pernah ikut mati.
+
+const SORT_VALUES = ["relevance", "newest", "price_asc", "price_desc", "rating", "sold"] as const;
+const CONDITION_VALUES = ["BARU", "BEKAS"] as const;
+
+export type SearchFilters = {
+  keywords: string;
+  categorySlug: string | null;
+  minPrice: number | null;
+  maxPrice: number | null;
+  conditions: string[];
+  onSale: boolean;
+  sort: (typeof SORT_VALUES)[number];
+};
+
+const FILTER_SCHEMA = {
+  type: "object",
+  properties: {
+    keywords: { type: "string" },
+    categorySlug: { type: "string", nullable: true },
+    minPrice: { type: "number", nullable: true },
+    maxPrice: { type: "number", nullable: true },
+    conditions: { type: "array", items: { type: "string", enum: [...CONDITION_VALUES] } },
+    onSale: { type: "boolean" },
+    sort: { type: "string", enum: [...SORT_VALUES] },
+    reason: { type: "string" },
+  },
+  required: ["keywords", "sort", "reason"],
+} as const;
+
+function heuristicFilters(query: string): SearchFilters {
+  const budget = parseBudget(query);
+  const lower = query.toLowerCase();
+  return {
+    keywords: query.trim(),
+    categorySlug: detectCategory(query),
+    minPrice: null,
+    maxPrice: budget,
+    conditions: lower.includes("bekas") || lower.includes("second") ? ["BEKAS"] : [],
+    onSale: lower.includes("diskon") || lower.includes("promo") || lower.includes("murah"),
+    // "termurah" jelas minta harga naik; selain itu relevansi paling aman.
+    sort: /termurah|paling murah/.test(lower)
+      ? "price_asc"
+      : /terlaris|paling laku/.test(lower)
+        ? "sold"
+        : /terbaru|baru rilis/.test(lower)
+          ? "newest"
+          : "relevance",
+  };
+}
+
+export async function searchFilters(query: string) {
+  const categories = await prisma.category.findMany({
+    select: { slug: true, name: true },
+    take: 400,
+  });
+  const katalog = categories.map((c) => `${c.slug} (${c.name})`).join(", ");
+
+  const prompt = [
+    "Kamu membantu marketplace Indonesia menerjemahkan kalimat pencarian menjadi filter.",
+    "Balas JSON saja.",
+    "",
+    `Kalimat pencarian: "${query}"`,
+    "",
+    katalog ? `Slug kategori yang tersedia: ${katalog}` : "Belum ada kategori terdaftar.",
+    "",
+    "Aturan:",
+    "- keywords: kata benda inti barangnya saja, buang kata seperti 'murah', 'terbaik', 'di bawah 5 juta'.",
+    "- categorySlug: HARUS salah satu slug di atas, atau null kalau tidak ada yang cocok. Jangan mengarang.",
+    "- minPrice/maxPrice dalam rupiah penuh (15 juta = 15000000), null kalau tidak disebut.",
+    "- conditions: ['BEKAS'] kalau user minta barang bekas/second, ['BARU'] kalau minta baru, [] kalau tidak disebut.",
+    "- onSale: true hanya kalau user secara eksplisit mencari diskon atau promo.",
+    "- sort: pilih algoritma yang paling melayani maksud user.",
+    "  price_asc kalau mencari yang termurah, price_desc kalau mencari yang termahal,",
+    "  sold kalau mencari yang terlaris, rating kalau mencari yang paling bagus ulasannya,",
+    "  newest kalau mencari yang terbaru, relevance untuk selain itu.",
+    "- reason: satu kalimat pendek bahasa Indonesia, jelaskan kenapa sort itu dipilih.",
+  ].join("\n");
+
+  const raw = await generateJson<Record<string, unknown>>(prompt, FILTER_SCHEMA);
+
+  if (!raw || typeof raw.keywords !== "string") {
+    const fallback = heuristicFilters(query);
+    return {
+      query,
+      filters: fallback,
+      reason: "Ditafsirkan tanpa AI karena Gemini tidak tersedia.",
+      source: "heuristic" as const,
+    };
+  }
+
+  const allowedSlugs = new Set(categories.map((c) => c.slug));
+  const slug = typeof raw.categorySlug === "string" ? raw.categorySlug : null;
+  const conditions = Array.isArray(raw.conditions)
+    ? raw.conditions.filter((c): c is string => typeof c === "string" && CONDITION_VALUES.includes(c as never))
+    : [];
+  const sort = SORT_VALUES.includes(raw.sort as never) ? (raw.sort as SearchFilters["sort"]) : "relevance";
+  const angka = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+
+  return {
+    query,
+    filters: {
+      keywords: raw.keywords.trim() || query.trim(),
+      // Slug karangan dibuang: kategori yang tidak ada bikin hasil pencarian
+      // kosong tanpa alasan yang bisa dijelaskan ke user.
+      categorySlug: slug && allowedSlugs.has(slug) ? slug : null,
+      minPrice: angka(raw.minPrice),
+      maxPrice: angka(raw.maxPrice),
+      conditions,
+      onSale: raw.onSale === true,
+      sort,
+    } satisfies SearchFilters,
+    reason: typeof raw.reason === "string" ? raw.reason : "",
+    source: "gemini" as const,
+  };
 }

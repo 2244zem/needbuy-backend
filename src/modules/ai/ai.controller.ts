@@ -35,3 +35,7 @@ export function checkProduct(req: Request, res: Response) {
 export async function productQuestion(req: Request, res: Response) {
   res.json(ok(await aiService.answerProductQuestion(req.body)));
 }
+
+export async function searchFilters(req: Request, res: Response) {
+  res.json(ok(await aiService.searchFilters(req.body.query)));
+}

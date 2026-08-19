@@ -12,6 +12,7 @@ import {
   marketPulseSchema,
   plansSchema,
   productQuestionSchema,
+  searchFiltersSchema,
   similarSchema,
 } from "./ai.schema";
 
@@ -65,4 +66,12 @@ aiRouter.post(
   "/products/ask",
   validate({ body: productQuestionSchema }),
   asyncHandler(controller.productQuestion)
+);
+
+// Menerjemahkan kalimat pencarian jadi filter + algoritma pengurutan.
+// Terbuka tanpa login: pencarian memang bisa dilakukan tamu.
+aiRouter.post(
+  "/search/filters",
+  validate({ body: searchFiltersSchema }),
+  asyncHandler(controller.searchFilters)
 );

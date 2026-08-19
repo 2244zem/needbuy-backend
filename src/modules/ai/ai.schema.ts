@@ -26,6 +26,10 @@ export const interpretSchema = z
   .object({ rawInput: z.string().min(1).max(1000) })
   .strict();
 
+export const searchFiltersSchema = z
+  .object({ query: z.string().min(1).max(300) })
+  .strict();
+
 export const similarSchema = z
   .object({
     needId: z.string().uuid(),
@@ -102,6 +106,7 @@ export const checkProductSchema = z
   .strict();
 
 export type InterpretInput = z.infer<typeof interpretSchema>;
+export type SearchFiltersInput = z.infer<typeof searchFiltersSchema>;
 export type SimilarInput = z.infer<typeof similarSchema>;
 export type PlansInput = z.infer<typeof plansSchema>;
 export type InsightsInput = z.infer<typeof insightsSchema>;
