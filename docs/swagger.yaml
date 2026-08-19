@@ -892,6 +892,10 @@ paths:
       tags: [Users]
       summary: Profil lengkap user saat ini
       description: |
+        Membawa `hasPassword` dan `emailVerified`. Pakai `hasPassword` untuk
+        memilih antara "Atur Password" (akun Google yang belum punya) dan
+        "Ganti Password"; hash passwordnya sendiri tidak pernah ikut keluar.
+
         Lebih kaya dari `GET /auth/me`: menyertakan profil toko (kalau ada) dan
         ringkasan jumlah order, need, serta alamat. `GET /auth/me` tetap ada
         sebagai payload sesi yang ringan untuk dipanggil setelah login.
@@ -954,6 +958,49 @@ paths:
                   success: { type: boolean }
                   data: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /users/me/set-password:
+    post:
+      tags: [Users]
+      summary: Buat password untuk akun yang belum punya
+      description: |
+        Untuk akun yang mendaftar lewat Google dan karena itu tidak punya
+        password sama sekali. Tidak meminta password lama karena memang tidak
+        ada; yang dijadikan bukti kepemilikan adalah email terverifikasi.
+
+        Ditolak kalau akun sudah punya password (`PASSWORD_ALREADY_SET`) —
+        untuk itu pakai `/users/me/change-password` — atau kalau emailnya
+        belum terverifikasi (`EMAIL_NOT_VERIFIED`). Link verifikasi bisa
+        diminta ulang lewat `POST /auth/resend-verification`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              additionalProperties: false
+              properties:
+                newPassword: { type: string, minLength: 8, maxLength: 72 }
+      responses:
+        "200":
+          description: Password dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      hasPassword: { type: boolean }
+        "400":
+          description: Email belum terverifikasi (EMAIL_NOT_VERIFIED)
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Akun sudah punya password (PASSWORD_ALREADY_SET)
         "422": { $ref: "#/components/responses/ValidationError" }
 
   /users/me/change-password:

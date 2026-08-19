@@ -4,7 +4,7 @@ import { requireAuth } from "../../middleware/auth";
 import { authLimiter, writeLimiter } from "../../middleware/rateLimit";
 import { validate } from "../../middleware/validate";
 import * as controller from "./users.controller";
-import { changePasswordSchema, updateProfileSchema } from "./users.schema";
+import { changePasswordSchema, setPasswordSchema, updateProfileSchema } from "./users.schema";
 
 export const usersRouter = Router();
 
@@ -17,6 +17,13 @@ usersRouter.patch(
   writeLimiter,
   validate({ body: updateProfileSchema }),
   asyncHandler(controller.updateMe)
+);
+
+usersRouter.post(
+  "/me/set-password",
+  authLimiter,
+  validate({ body: setPasswordSchema }),
+  asyncHandler(controller.setPassword)
 );
 
 usersRouter.post(

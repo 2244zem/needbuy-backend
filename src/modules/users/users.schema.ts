@@ -22,6 +22,10 @@ export const updateProfileSchema = z
     message: "Minimal satu field harus diisi",
   });
 
+export const setPasswordSchema = z
+  .object({ newPassword: z.string().min(8, "Password minimal 8 karakter").max(72) })
+  .strict();
+
 export const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1, "Password saat ini wajib diisi").max(128),
@@ -38,3 +42,5 @@ export const changePasswordSchema = z
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+export type SetPasswordInput = z.infer<typeof setPasswordSchema>;

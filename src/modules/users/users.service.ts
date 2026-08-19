@@ -25,12 +25,61 @@ export async function getProfile(userId: string) {
     where: { id: userId },
     select: {
       ...publicUserSelect,
+      // Diambil hanya untuk diturunkan jadi boolean di bawah. Hash-nya sendiri
+      // tidak pernah ikut keluar dari fungsi ini.
+      passwordHash: true,
+      emailVerifiedAt: true,
+      authProvider: true,
       seller: { select: { id: true, storeName: true, status: true, rating: true } },
       _count: { select: { orders: true, needs: true, addresses: true } },
     },
   });
   if (!user) throw AppError.notFound("User nggak ketemu.");
-  return user;
+
+  const { passwordHash, ...rest } = user;
+  return {
+    ...rest,
+    // Dipakai UI untuk memilih antara "Atur Password" dan "Ganti Password".
+    // Akun yang mendaftar lewat Google tidak punya password sama sekali.
+    hasPassword: Boolean(passwordHash),
+    emailVerified: Boolean(user.emailVerifiedAt),
+  };
+}
+
+/**
+ * Membuat password untuk akun yang belum punya — hampir selalu akun Google.
+ *
+ * Tidak meminta password lama karena memang tidak ada. Yang dijadikan bukti
+ * kepemilikan adalah email terverifikasi: tanpa itu, siapa pun yang sempat
+ * memegang sesi bisa memasang password dan mengambil alih akun.
+ *
+ * Sebelumnya tidak ada jalan sama sekali — changePassword menolak akun tanpa
+ * password, dan tidak ada endpoint untuk membuatnya, jadi user Google terkunci
+ * selamanya pada satu cara masuk.
+ */
+export async function setPassword(userId: string, newPassword: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, passwordHash: true, emailVerifiedAt: true },
+  });
+  if (!user) throw AppError.notFound("User nggak ketemu.");
+
+  if (user.passwordHash) {
+    throw AppError.conflict(
+      "Akun ini udah punya password. Pakai ganti password ya.",
+      "PASSWORD_ALREADY_SET"
+    );
+  }
+  if (!user.emailVerifiedAt) {
+    throw AppError.badRequest(
+      "Verifikasi email kamu dulu sebelum bikin password.",
+      "EMAIL_NOT_VERIFIED"
+    );
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, env.BCRYPT_ROUNDS);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  return { hasPassword: true };
 }
 
 export async function listUsers(query: {
@@ -140,12 +189,27 @@ export async function updateProfile(userId: string, input: UpdateProfileInput) {
 export async function changePassword(userId: string, input: ChangePasswordInput) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, role: true, passwordHash: true },
+    select: { id: true, email: true, role: true, passwordHash: true, emailVerifiedAt: true },
   });
   if (!user) throw AppError.notFound("User nggak ketemu.");
 
+  // Akun tanpa password diarahkan ke jalur pembuatan, bukan dibiarkan buntu.
+  // Dulu pesannya hanya memberitahu bahwa passwordnya tidak ada, tanpa
+  // memberi tahu apa yang harus dilakukan — dan memang belum ada jalannya.
   if (!user.passwordHash) {
-    throw AppError.badRequest("Akun terdaftar menggunakan social login dan nggak memiliki password.");
+    throw AppError.badRequest(
+      "Akun ini belum punya password. Atur password dulu ya.",
+      "PASSWORD_NOT_SET"
+    );
+  }
+
+  // Ganti password wajib lewat email terverifikasi: kalau emailnya belum
+  // terbukti milik user, jalur pemulihan lewat email juga tidak bisa dipercaya.
+  if (!user.emailVerifiedAt) {
+    throw AppError.badRequest(
+      "Verifikasi email kamu dulu sebelum ganti password.",
+      "EMAIL_NOT_VERIFIED"
+    );
   }
 
   const valid = await bcrypt.compare(input.currentPassword, user.passwordHash);

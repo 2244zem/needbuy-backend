@@ -14,3 +14,7 @@ export async function updateMe(req: Request, res: Response) {
 export async function changePassword(req: Request, res: Response) {
   res.json(ok(await userService.changePassword(currentUser(req).id, req.body)));
 }
+
+export async function setPassword(req: Request, res: Response) {
+  res.json(ok(await userService.setPassword(currentUser(req).id, req.body.newPassword)));
+}
