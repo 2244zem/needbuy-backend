@@ -7,6 +7,7 @@ import { AppError } from "../../lib/apiError";
 import { buildMeta, toSkipTake } from "../../lib/pagination";
 import { issueRefreshToken, signAccessToken } from "../auth/auth.service";
 import type { ChangePasswordInput, UpdateProfileInput } from "./users.schema";
+import { PAID_ORDER_WHERE } from "../../lib/revenue";
 
 const publicUserSelect = {
   id: true,
@@ -107,6 +108,10 @@ export async function listUsers(query: {
       where,
       select: {
         ...publicUserSelect,
+        // Admin butuh tahu mana akun yang emailnya sudah terbukti aktif.
+        // Sebelumnya kolom Status pembeli dipaku "Aktif" karena User memang
+        // tidak punya status apa pun, jadi kolomnya tidak berarti apa-apa.
+        emailVerifiedAt: true,
         seller: {
           select: {
             id: true,
@@ -131,7 +136,7 @@ export async function listUsers(query: {
     userIds.length
       ? prisma.order.groupBy({
           by: ["userId"],
-          where: { userId: { in: userIds }, payment: { status: "PAID" } },
+          where: { userId: { in: userIds }, ...PAID_ORDER_WHERE },
           _sum: { total: true },
           _count: { _all: true },
         })
@@ -139,7 +144,7 @@ export async function listUsers(query: {
     sellerIds.length
       ? prisma.order.groupBy({
           by: ["sellerId"],
-          where: { sellerId: { in: sellerIds }, payment: { status: "PAID" } },
+          where: { sellerId: { in: sellerIds }, ...PAID_ORDER_WHERE },
           _sum: { total: true },
         })
       : [],
@@ -152,8 +157,10 @@ export async function listUsers(query: {
 
   const items = rows.map((row) => {
     const spend = spendByUser.get(row.id);
+    const { emailVerifiedAt, ...sisa } = row;
     return {
-      ...row,
+      ...sisa,
+      emailVerified: Boolean(emailVerifiedAt),
       totalOrders: spend?._count._all ?? 0,
       totalSpent: Number(spend?._sum.total ?? 0),
       seller: row.seller

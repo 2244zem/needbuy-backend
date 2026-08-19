@@ -1,4 +1,5 @@
 import { prisma } from "../../config/prisma";
+import { PAID_ORDER_WHERE } from "../../lib/revenue";
 
 const WINDOW_DAYS = 30;
 
@@ -18,7 +19,7 @@ export async function analytics() {
   const previousStart = new Date(now.getTime() - 2 * WINDOW_DAYS * 86_400_000);
 
   const paidIn = (from: Date, to: Date) => ({
-    payment: { status: "PAID" as const },
+    ...PAID_ORDER_WHERE,
     createdAt: { gte: from, lt: to },
   });
 

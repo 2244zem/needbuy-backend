@@ -8,6 +8,7 @@ import {
   hasOwnStore,
 } from "../../lib/selfPurchase";
 import type { CreateSellerInput, ListSellersQuery, UpdateSellerInput } from "./schema";
+import { PAID_ORDER_WHERE } from "../../lib/revenue";
 
 const publicSellerSelect = {
   id: true,
@@ -176,7 +177,7 @@ export async function listForAdmin(query: {
   const revenueRows = rows.length
     ? await prisma.order.groupBy({
         by: ["sellerId"],
-        where: { sellerId: { in: rows.map((row) => row.id) }, payment: { status: "PAID" } },
+        where: { sellerId: { in: rows.map((row) => row.id) }, ...PAID_ORDER_WHERE },
         _sum: { total: true, commissionAmount: true },
       })
     : [];

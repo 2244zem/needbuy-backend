@@ -4626,6 +4626,18 @@ paths:
       description: |
         Memakai daftar kolom publik yang sama dengan endpoint lain, admin pun
         tidak pernah menerima `passwordHash`.
+
+        Tiap baris membawa `totalOrders`, `totalSpent`, dan `emailVerified`.
+        Dua yang pertama dihitung dari pesanan yang uangnya benar-benar
+        berpindah: pembayaran lunas, ATAU pesanan COD yang paketnya sudah
+        sampai. Pesanan batal tidak pernah ikut. Sebelumnya hanya
+        `payment.status = PAID` yang dihitung, sehingga seluruh pesanan COD —
+        yang pembayarannya tunai dan barisnya tetap PENDING — tidak pernah
+        muncul.
+
+        `emailVerified` dipakai untuk kolom Status pembeli. User tidak punya
+        status aktif/nonaktif, jadi verifikasi email adalah keadaan nyata yang
+        bisa dilaporkan di situ.
       parameters:
         - { name: role, in: query, schema: { type: string, enum: [BUYER, SELLER, ADMIN] } }
         - { name: q, in: query, description: Cari pada nama atau email, schema: { type: string, maxLength: 120 } }

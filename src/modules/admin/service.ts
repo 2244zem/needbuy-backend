@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma";
 import { getCommissionPercent } from "./config.service";
+import { PAID_ORDER_WHERE } from "../../lib/revenue";
 
 type RevenueBucketRow = { bucket: Date; gmv: number; revenue: number };
 type CategoryRow = { name: string; revenue: number };
@@ -31,10 +32,10 @@ export async function dashboard() {
     prisma.need.count(),
     prisma.need.count({ where: { status: "COMPLETED" } }),
     prisma.order.count(),
-    prisma.order.count({ where: { payment: { status: "PAID" } } }),
+    prisma.order.count({ where: PAID_ORDER_WHERE }),
     
     prisma.order.aggregate({
-      where: { payment: { status: "PAID" } },
+      where: PAID_ORDER_WHERE,
       _sum: { total: true, commissionAmount: true },
     }),
 
