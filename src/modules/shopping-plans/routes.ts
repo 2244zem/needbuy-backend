@@ -41,6 +41,13 @@ shoppingPlansRouter.patch(
   asyncHandler(controller.update)
 );
 
+shoppingPlansRouter.delete(
+  "/:id",
+  writeLimiter,
+  validate({ params: planIdParams }),
+  asyncHandler(controller.remove)
+);
+
 shoppingPlansRouter.get(
   "/:id/alternatives",
   validate({ params: planIdParams }),

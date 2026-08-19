@@ -3677,6 +3677,32 @@ paths:
           description: Plan dihitung ulang
         "404": { $ref: "#/components/responses/NotFound" }
 
+    delete:
+      tags: [Shopping Plans]
+      summary: Hapus rencana belanja
+      description: |
+        Menghapus rencana beserta seluruh itemnya. Item ikut terhapus lewat
+        cascade di database, jadi tidak perlu dikosongkan lebih dulu.
+
+        Hanya pemilik rencana yang boleh menghapus.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Rencana dihapus
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      deleted: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /shopping-plans/{id}/items:
     post:
       tags: [Shopping Plans]

@@ -153,6 +153,20 @@ export async function updatePlan(userId: string, planId: string, input: UpdatePl
   });
 }
 
+/**
+ * Menghapus rencana beserta isinya. Item ikut terhapus lewat onDelete: Cascade
+ * di schema, jadi tidak perlu dibersihkan manual.
+ *
+ * Endpoint ini sebelumnya tidak ada sama sekali: CRUD hanya lengkap untuk item
+ * DI DALAM rencana, sementara rencananya sendiri tidak bisa dihapus dan
+ * frontend membalas "Endpoint DELETE /shopping-plans/:id nggak ada".
+ */
+export async function deletePlan(userId: string, planId: string) {
+  await requireOwnPlan(userId, planId);
+  await prisma.shoppingPlan.delete({ where: { id: planId } });
+  return { deleted: true };
+}
+
 export async function addItem(userId: string, planId: string, productId: string, quantity: number) {
   await requireOwnPlan(userId, planId);
 

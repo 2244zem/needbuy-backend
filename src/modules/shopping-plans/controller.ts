@@ -63,3 +63,7 @@ export async function alternatives(req: Request, res: Response) {
 export async function addAllToCart(req: Request, res: Response) {
   res.json(ok(await planService.addAllToCart(currentUser(req).id, req.params.id)));
 }
+
+export async function remove(req: Request, res: Response) {
+  res.json(ok(await planService.deletePlan(currentUser(req).id, req.params.id)));
+}
