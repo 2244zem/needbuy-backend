@@ -1600,7 +1600,7 @@ paths:
         - name: sort
           in: query
           description: Dibatasi allowlist; nilai lain ditolak 422.
-          schema: { type: string, enum: [newest, price_asc, price_desc, rating, sold], default: newest }
+          schema: { type: string, enum: [relevance, newest, price_asc, price_desc, rating, sold], default: relevance }
         - { $ref: "#/components/parameters/Page" }
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -1679,7 +1679,7 @@ paths:
           schema: { type: string, enum: ["true", "false", "1", "0"] }
         - name: sort
           in: query
-          schema: { type: string, enum: [newest, price_asc, price_desc, rating, sold], default: newest }
+          schema: { type: string, enum: [relevance, newest, price_asc, price_desc, rating, sold], default: relevance }
         - { $ref: "#/components/parameters/Page" }
         - { $ref: "#/components/parameters/Limit" }
       responses:

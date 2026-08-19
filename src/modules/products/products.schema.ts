@@ -7,6 +7,9 @@ const moneySchema = z
   .refine((value) => Number(value) >= 0, "Harga nggak boleh negatif");
 
 export const PRODUCT_SORT_FIELDS = [
+  // Default. Saat ada kata kunci, hasil diurutkan menurut kecocokan; tanpa
+  // kata kunci tidak ada yang bisa diperingkat sehingga jatuh ke "newest".
+  "relevance",
   "newest",
   "price_asc",
   "price_desc",
@@ -44,7 +47,7 @@ export const listProductsQuery = z
       .enum(["true", "false", "1", "0"])
       .transform((value) => value === "true" || value === "1")
       .optional(),
-    sort: z.enum(PRODUCT_SORT_FIELDS).default("newest"),
+    sort: z.enum(PRODUCT_SORT_FIELDS).default("relevance"),
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   })

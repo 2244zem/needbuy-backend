@@ -49,12 +49,98 @@ function withCondition<T extends { attributes: { attrValue: string }[] }>(produc
 }
 
 const ORDER_BY: Record<ListProductsQuery["sort"], Prisma.ProductOrderByWithRelationInput> = {
+  // Tanpa kata kunci tidak ada yang bisa diperingkat, jadi relevance sama
+  // dengan newest. Dengan kata kunci, peringkatnya dihitung di rankByRelevance.
+  relevance: { createdAt: "desc" },
   newest: { createdAt: "desc" },
   price_asc: { price: "asc" },
   price_desc: { price: "desc" },
   rating: { rating: "desc" },
   sold: { soldCount: "desc" },
 };
+
+// ── Pencarian ────────────────────────────────────────────────────────────────
+// Sebelumnya kata kunci dipakai utuh sebagai satu frasa, sehingga "laptop
+// gaming murah" tidak pernah cocok dengan produk bernama "Laptop Gaming ASUS".
+// Kata kunci sekarang dipecah dan setiap kata harus muncul di nama ATAU
+// deskripsi, lalu hasilnya diperingkat menurut seberapa baik cocoknya.
+
+const RELEVANCE_WINDOW = 300;
+
+export function searchTerms(q: string): string[] {
+  return [...new Set(q.toLowerCase().split(/\s+/).map((t) => t.trim()).filter((t) => t.length > 1))];
+}
+
+function searchWhere(q: string): Prisma.ProductWhereInput {
+  const terms = searchTerms(q);
+  if (terms.length === 0) {
+    return {
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { description: { contains: q, mode: "insensitive" } },
+      ],
+    };
+  }
+  return {
+    AND: terms.map((term) => ({
+      OR: [
+        { name: { contains: term, mode: "insensitive" } },
+        { description: { contains: term, mode: "insensitive" } },
+      ],
+    })),
+  };
+}
+
+// Nama jauh lebih menentukan daripada deskripsi: orang mengetik nama barang,
+// bukan isi paragraf promosi. Cocok persis dan cocok di awal nama diberi
+// bobot tertinggi supaya "laptop" tidak kalah oleh produk yang kebetulan
+// menyebut "laptop" berkali-kali di deskripsi.
+export function relevanceScore(product: { name: string; description: string | null; soldCount: number; rating: unknown }, q: string): number {
+  const name = product.name.toLowerCase();
+  const desc = (product.description ?? "").toLowerCase();
+  const query = q.toLowerCase().trim();
+  const terms = searchTerms(q);
+
+  let score = 0;
+  if (name === query) score += 1000;
+  else if (name.startsWith(query)) score += 500;
+  else if (name.includes(query)) score += 300;
+
+  for (const term of terms) {
+    if (name.includes(term)) score += 60;
+    // Cocok di awal sebuah kata lebih berarti daripada kebetulan tersisip
+    // di tengah kata lain: "top" di "laptop" jangan sekuat "top handle".
+    if (name.split(/[^a-z0-9]+/i).some((word) => word.startsWith(term))) score += 40;
+    if (desc.includes(term)) score += 8;
+  }
+
+  // Pemecah seri, bukan penentu: produk laris sedikit diunggulkan saat
+  // kecocokannya setara.
+  score += Math.min(product.soldCount, 100) / 20;
+  return score;
+}
+
+async function rankByRelevance(
+  where: Prisma.ProductWhereInput,
+  q: string,
+  skip: number,
+  take: number
+) {
+  const candidates = await prisma.product.findMany({
+    where,
+    select: { ...listSelect, description: true },
+    orderBy: { soldCount: "desc" },
+    take: RELEVANCE_WINDOW,
+  });
+  const ranked = candidates
+    .map((product) => ({ product, score: relevanceScore(product, q) }))
+    .sort((a, b) => b.score - a.score)
+    .map((row) => {
+      const { description: _description, ...rest } = row.product;
+      return rest;
+    });
+  return ranked.slice(skip, skip + take);
+}
 
 async function idsForCategorySlugs(slugs: string[]): Promise<string[]> {
   const roots = await prisma.category.findMany({
@@ -96,14 +182,7 @@ export async function list(query: ListProductsQuery, categoryIds?: string[]) {
     ...(query.conditions?.length ? { AND: [conditionWhere(query.conditions)] } : {}),
     ...(query.sellerId ? { sellerId: query.sellerId } : {}),
     ...(query.onSale ? { discountPercent: { gt: 0 } } : {}),
-    ...(query.q
-      ? {
-          OR: [
-            { name: { contains: query.q, mode: "insensitive" } },
-            { description: { contains: query.q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
+    ...(query.q ? searchWhere(query.q) : {}),
     ...(query.minPrice !== undefined || query.maxPrice !== undefined
       ? {
           price: {
@@ -115,8 +194,11 @@ export async function list(query: ListProductsQuery, categoryIds?: string[]) {
   };
 
   const { skip, take } = toSkipTake(query);
+  const useRelevance = query.sort === "relevance" && Boolean(query.q);
   const [items, total] = await Promise.all([
-    prisma.product.findMany({ where, select: listSelect, orderBy: ORDER_BY[query.sort], skip, take }),
+    useRelevance
+      ? rankByRelevance(where, query.q as string, skip, take)
+      : prisma.product.findMany({ where, select: listSelect, orderBy: ORDER_BY[query.sort], skip, take }),
     prisma.product.count({ where }),
   ]);
 
